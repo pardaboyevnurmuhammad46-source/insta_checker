@@ -15,6 +15,14 @@ class UserLinkViewSet(viewsets.ModelViewSet):
     serializer_class = UserLinkSerializer
 
 @api_view(['GET'])
+def link_info(request):
+    return Response({
+        "message": "Unikal link formati: /link/<token>/",
+        "example": "Adminkadan (http://127.0.0.1:8000/admin/) yangi User Link yarating va berilgan unikal linkka kiring.",
+        "api_users_url": "/api/users/"
+    })
+
+@api_view(['GET'])
 def redirect_to_instagram(request, token):
     """
     Bu yerda user o'ziga berilgan linkni bosganda keladigan endpoint.
