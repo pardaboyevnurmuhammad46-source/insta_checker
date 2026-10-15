@@ -19,6 +19,10 @@ class InstagramOAuthError(Exception):
     pass
 
 
+class InstagramNetworkError(InstagramOAuthError):
+    pass
+
+
 class InstagramPublishError(Exception):
     pass
 
@@ -39,7 +43,7 @@ class MetaWebhookError(Exception):
 # ==========================================
 
 def build_instagram_auth_url(token: str) -> str:
-    base_url = "https://api.instagram.com/oauth/authorize"
+    base_url = "https://www.instagram.com/oauth/authorize"
     params = {
         'client_id': settings.INSTAGRAM_APP_ID,
         'redirect_uri': settings.INSTAGRAM_REDIRECT_URI,
@@ -64,7 +68,7 @@ def exchange_code_for_token(code: str) -> dict:
     try:
         response = requests.post(token_url, data=payload, timeout=15)
     except requests.RequestException as exc:
-        raise InstagramOAuthError(f"Instagram serveriga ulanishda xatolik: {exc}") from exc
+        raise InstagramNetworkError(f"Instagram serveriga ulanishda tarmoq xatoligi: {exc}") from exc
 
     if response.status_code != 200:
         raise InstagramOAuthError(f"Access token olishda xatolik: {response.text}")
@@ -83,7 +87,7 @@ def get_long_lived_token(short_lived_token: str) -> dict:
     try:
         response = requests.get(graph_url, params=params, timeout=15)
     except requests.RequestException as exc:
-        raise InstagramOAuthError(f"Long-lived token olishda tarmoq xatoligi: {exc}") from exc
+        raise InstagramNetworkError(f"Long-lived token olishda tarmoq xatoligi: {exc}") from exc
 
     if response.status_code != 200:
         raise InstagramOAuthError(f"Long-lived token olishda xatolik: {response.text}")
@@ -104,7 +108,7 @@ def refresh_instagram_access_token(access_token: str) -> dict:
     try:
         response = requests.get(url, params=params, timeout=15)
     except requests.RequestException as exc:
-        raise InstagramOAuthError(f"Token yangilashda tarmoq xatoligi: {exc}") from exc
+        raise InstagramNetworkError(f"Token yangilashda tarmoq xatoligi: {exc}") from exc
 
     if response.status_code != 200:
         raise InstagramOAuthError(f"Token yangilab bo'lmadi: {response.text}")
@@ -115,7 +119,8 @@ def refresh_instagram_access_token(access_token: str) -> dict:
 def refresh_user_token(user: InstagramUser) -> bool:
     """
     InstagramUser uchun tokenni yangilaydi va saqlaydi.
-    Agar token bekor qilingan bo'lsa, foydalanuvchini 'needs_reauth' holatiga o'tkazadi.
+    Tarmoq xatosi bo'lsa status o'zgarmaydi.
+    Faqat token bekor qilingan (OAuth xatosi) bo'lsa, 'needs_reauth' holatiga o'tkazadi.
     """
     if not user.access_token:
         return False
@@ -131,6 +136,9 @@ def refresh_user_token(user: InstagramUser) -> bool:
         user.save(update_fields=['access_token', 'token_expires_at', 'status'])
         logger.info("InstagramUser token yangilandi: user_id=%s", user.id)
         return True
+    except InstagramNetworkError as exc:
+        logger.warning("Foydalanuvchi tokenini yangilashda tarmoq xatosi (user_id=%s): %s", user.id, exc)
+        return False
     except InstagramOAuthError as exc:
         logger.warning("Foydalanuvchi tokenini yangilab bo'lmadi (user_id=%s): %s", user.id, exc)
         user.status = 'needs_reauth'
@@ -334,8 +342,7 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     - 1 .. 3 kun: har 1 soatda
     - 3 .. 7 kun: har 4 soatda
     - 7 .. 14 kun: har 12 soatda
-    - 14 .. 30 kun: har 24 soatda (kuniga 1 marta)
-    - > 30 kun: tekshirish yakunlanadi (None)
+    - 14 kundan so'ng (shu jumladan 30+ kunda ham post saqlanganini tekshirish uchun): kuniga 1 marta (24 soat)
     """
     if post.status != 'published' or not post.posted_at:
         return None
@@ -355,10 +362,8 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
         return now + timedelta(hours=4)
     elif age < timedelta(days=14):
         return now + timedelta(hours=12)
-    elif age < timedelta(days=30):
-        return now + timedelta(days=1)
     else:
-        return None
+        return now + timedelta(days=1)
 
 
 def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str) -> dict:

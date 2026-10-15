@@ -6,6 +6,9 @@ class InstagramUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = InstagramUser
         fields = '__all__'
+        extra_kwargs = {
+            'access_token': {'write_only': True},
+        }
 
 
 class UniqueLinkSerializer(serializers.ModelSerializer):

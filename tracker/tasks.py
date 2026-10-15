@@ -68,24 +68,31 @@ def check_post_metrics_task(self, post_id: int):
         raise self.retry(exc=exc)
 
 
+from django.db import transaction
+
+
 @shared_task
 def check_all_due_posts_task():
     """
     next_check_at vaqti kelgan barcha faol (published) postlar uchun fonda tekshiruv vazifalarini ishga tushiradi.
+    Worker orqada qolsa ham postlar qayta-qayta navbatga tushmasligi uchun darhol 10 daqiqaga 'band' qilinadi.
     """
     now = timezone.now()
-    due_post_ids = list(
-        Post.objects.filter(
-            status='published',
-            next_check_at__lte=now,
-        ).values_list('id', flat=True)
-    )
+    with transaction.atomic():
+        ids = list(
+            Post.objects.select_for_update(skip_locked=True)
+            .filter(status='published', next_check_at__lte=now)
+            .order_by('next_check_at')
+            .values_list('id', flat=True)[:500]
+        )
+        if ids:
+            Post.objects.filter(id__in=ids).update(next_check_at=now + timedelta(minutes=10))
 
-    logger.info("Vaqti yetgan postlar tekshiruvi: %d ta post topildi", len(due_post_ids))
-    for post_id in due_post_ids:
+    logger.info("Vaqti yetgan postlar tekshiruvi: %d ta post topildi va navbatga qo'yildi", len(ids))
+    for post_id in ids:
         check_post_metrics_task.delay(post_id)
 
-    return {"due_posts_count": len(due_post_ids), "post_ids": due_post_ids}
+    return len(ids)
 
 
 @shared_task

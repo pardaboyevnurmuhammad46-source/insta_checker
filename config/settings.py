@@ -140,11 +140,21 @@ MAILERS = {
     },
 }
 
+# REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAdminUser',
+    ],
+}
+
 # Instagram OAuth
 INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID', '')
 INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET', '')
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', 'http://127.0.0.1:8000/oauth/callback/')
-INSTAGRAM_SCOPE = os.getenv('INSTAGRAM_SCOPE', 'user_profile,user_media')
+INSTAGRAM_SCOPE = os.getenv(
+    'INSTAGRAM_SCOPE',
+    'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments',
+)
 
 # Celery & Redis Configuration
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')

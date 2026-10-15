@@ -7,6 +7,7 @@ from datetime import timedelta
 from unittest.mock import patch, MagicMock
 from django.test import TestCase, override_settings
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
@@ -16,6 +17,7 @@ from tracker.models import InstagramUser, UniqueLink, Post, Prize, DataDeletionR
 from tracker.admin import UniqueLinkAdmin, PostAdmin, InstagramUserAdmin
 from tracker.services import (
     InstagramOAuthError,
+    InstagramNetworkError,
     InstagramPublishError,
     InstagramMetricsError,
     MetaWebhookError,
@@ -56,6 +58,7 @@ class SettingsEnvTestCase(TestCase):
         self.assertIn('check-all-due-posts-metrics', settings.CELERY_BEAT_SCHEDULE)
         self.assertIn('refresh-expiring-instagram-tokens', settings.CELERY_BEAT_SCHEDULE)
         self.assertTrue(len(settings.PRIZE_MILESTONES) > 0)
+        self.assertIn('rest_framework.permissions.IsAdminUser', settings.REST_FRAMEWORK['DEFAULT_PERMISSION_CLASSES'])
 
 
 class ModelsTestCase(TestCase):
@@ -109,7 +112,7 @@ class InstagramOAuthTestCase(TestCase):
 
     def test_build_instagram_auth_url(self):
         url = build_instagram_auth_url(str(self.link.token))
-        self.assertIn("https://api.instagram.com/oauth/authorize", url)
+        self.assertIn("https://www.instagram.com/oauth/authorize", url)
         self.assertIn(f"state={self.link.token}", url)
         self.assertIn("response_type=code", url)
 
@@ -117,7 +120,7 @@ class InstagramOAuthTestCase(TestCase):
     def test_redirect_to_instagram_success(self):
         response = self.client.get(f"/link/{self.link.token}/")
         self.assertEqual(response.status_code, 302)
-        self.assertIn("api.instagram.com/oauth/authorize", response.headers['Location'])
+        self.assertIn("www.instagram.com/oauth/authorize", response.headers['Location'])
 
         self.link.refresh_from_db()
         self.assertEqual(self.link.status, 'opened')
@@ -289,10 +292,10 @@ class AdaptiveScheduleTestCase(TestCase):
         next_check = calculate_next_check(self.post, now=base_now)
         self.assertEqual(next_check, base_now + timedelta(days=1))
 
-        # > 30 days -> Stop checking (None)
+        # 35 days -> checks daily to verify post still exists and track milestones
         self.post.posted_at = base_now - timedelta(days=35)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertIsNone(next_check)
+        self.assertEqual(next_check, base_now + timedelta(days=1))
 
 
 class MetricsAndPrizesTestCase(TestCase):
@@ -314,12 +317,10 @@ class MetricsAndPrizesTestCase(TestCase):
 
     @patch('tracker.services.requests.get')
     def test_fetch_metrics_success(self, mock_get):
-        # 1st call for media details (likes, comments)
         resp1 = MagicMock()
         resp1.status_code = 200
         resp1.json.return_value = {'like_count': 45, 'comments_count': 12}
 
-        # 2nd call for insights views
         resp2 = MagicMock()
         resp2.status_code = 200
         resp2.json.return_value = {
@@ -357,13 +358,11 @@ class MetricsAndPrizesTestCase(TestCase):
         self.assertIsNotNone(self.post.last_checked_at)
         self.assertIsNotNone(self.post.next_check_at)
 
-        # Post views (1500) reached 500 and 1000 milestones
         prizes = Prize.objects.filter(post=self.post).order_by('milestone')
         self.assertEqual(prizes.count(), 2)
         self.assertEqual(prizes[0].milestone, 500)
         self.assertEqual(prizes[1].milestone, 1000)
 
-        # Calling again does not duplicate prizes (idempotent)
         check_and_award_prizes(self.post)
         self.assertEqual(Prize.objects.filter(post=self.post).count(), 2)
 
@@ -420,7 +419,7 @@ class TokenRefreshTestCase(TestCase):
         self.assertTrue(self.user.token_expires_at > timezone.now() + timedelta(days=50))
 
     @patch('tracker.services.requests.get')
-    def test_refresh_token_revoked(self, mock_get):
+    def test_refresh_token_revoked_oauth_error(self, mock_get):
         resp = MagicMock()
         resp.status_code = 400
         resp.text = "OAuthException: Error validating access token"
@@ -431,6 +430,18 @@ class TokenRefreshTestCase(TestCase):
 
         self.user.refresh_from_db()
         self.assertEqual(self.user.status, 'needs_reauth')
+
+    @patch('tracker.services.requests.get')
+    def test_refresh_token_network_error_preserves_status(self, mock_get):
+        import requests
+        mock_get.side_effect = requests.RequestException("Connection timeout")
+
+        success = refresh_user_token(self.user)
+        self.assertFalse(success)
+
+        self.user.refresh_from_db()
+        # Tarmoq xatosi bo'lganda user statusi 'needs_reauth' ga o'tib ketmasligi kerak!
+        self.assertEqual(self.user.status, 'connected')
 
 
 class MetaWebhooksTestCase(TestCase):
@@ -476,7 +487,6 @@ class MetaWebhooksTestCase(TestCase):
         payload = {"user_id": "meta_17841", "algorithm": "HMAC-SHA256"}
         signed_request = create_mock_signed_request(payload, self.secret)
 
-        # 1. POST to data deletion endpoint
         response = self.client.post("/oauth/data-deletion/", {"signed_request": signed_request})
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -485,13 +495,11 @@ class MetaWebhooksTestCase(TestCase):
         self.assertIn("url", data)
         conf_code = data["confirmation_code"]
 
-        # Check user anonymized
         self.user.refresh_from_db()
         self.assertEqual(self.user.status, "needs_reauth")
         self.assertIsNone(self.user.access_token)
         self.assertIn("Deleted User", self.user.name)
 
-        # 2. Check deletion status endpoint
         status_resp = self.client.get(f"/oauth/data-deletion/status/{conf_code}/")
         self.assertEqual(status_resp.status_code, 200)
         status_data = status_resp.json()
@@ -521,8 +529,12 @@ class CeleryBeatAndTasksTestCase(TestCase):
     @patch('tracker.tasks.check_post_metrics_task.delay')
     def test_check_all_due_posts_task(self, mock_task_delay):
         res = check_all_due_posts_task()
-        self.assertEqual(res["due_posts_count"], 1)
+        self.assertEqual(res, 1)
         mock_task_delay.assert_called_once_with(self.post.id)
+
+        # Post next_check_at avtomatik ravishda kamida 8 daqiqaga oldinga surilganini tekshirish
+        self.post.refresh_from_db()
+        self.assertTrue(self.post.next_check_at > timezone.now() + timedelta(minutes=8))
 
     @patch('tracker.tasks.update_post_metrics')
     def test_check_post_metrics_task(self, mock_update):
@@ -563,3 +575,43 @@ class CeleryBeatAndTasksTestCase(TestCase):
 
         admin_instance.refresh_token_action(mock_request, queryset)
         mock_refresh.assert_called_once_with(self.user)
+
+
+class RestApiSecurityTestCase(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser(username="admin", password="password123")
+        self.ig_user = InstagramUser.objects.create(
+            name="Secure User",
+            ig_user_id="sec_123",
+            access_token="secret_token_never_expose",
+            status="connected",
+        )
+        dummy = SimpleUploadedFile("s.mp4", b"data", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.ig_user, video=dummy)
+        self.post = Post.objects.create(link=self.link, status='published')
+
+    def test_api_users_unauthenticated_forbidden(self):
+        response = self.client.get("/api/users/")
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_api_users_authenticated_admin_success_and_token_not_exposed(self):
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/users/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        users_list = data if isinstance(data, list) else data.get('results', [])
+        self.assertTrue(len(users_list) > 0)
+        # access_token javobda chiqmasligi kerak (write_only: True)
+        first_user = users_list[0]
+        self.assertNotIn("access_token", first_user)
+
+    def test_custom_actions_unauthenticated_forbidden(self):
+        resp1 = self.client.post(f"/api/users/{self.ig_user.id}/refresh-token/")
+        self.assertIn(resp1.status_code, (401, 403))
+
+        resp2 = self.client.post(f"/api/posts/{self.post.id}/check-metrics/")
+        self.assertIn(resp2.status_code, (401, 403))
+
+    def test_public_endpoints_accessible_without_auth(self):
+        resp_info = self.client.get("/link/")
+        self.assertEqual(resp_info.status_code, 200)

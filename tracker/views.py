@@ -71,6 +71,7 @@ class DataDeletionRequestViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def link_info(request):
     return Response({
         "message": "Unikal link formati: /link/<token>/",
@@ -79,6 +80,7 @@ def link_info(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def redirect_to_instagram(request, token):
     link = get_object_or_404(UniqueLink, token=token)
 
@@ -116,6 +118,7 @@ def redirect_to_instagram(request, token):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def instagram_callback(request):
     # Foydalanuvchi rad etgan yoki Instagram xatolik qaytargan holat
     if request.GET.get('error'):
