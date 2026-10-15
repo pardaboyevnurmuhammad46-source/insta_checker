@@ -1,21 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-from pathlib import Path
 
 
 def main():
     """Run administrative tasks."""
-    # Virtual environment avtomatik aniqlash va ishga tushirish
-    base_dir = Path(__file__).resolve().parent
-    venv_python = base_dir / "venv" / "bin" / "python"
-    if venv_python.exists() and sys.executable != str(venv_python):
-        try:
-            import django
-        except ImportError:
-            os.execv(str(venv_python), [str(venv_python)] + sys.argv)
-
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
     try:
         from django.core.management import execute_from_command_line
