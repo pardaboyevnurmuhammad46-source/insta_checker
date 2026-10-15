@@ -144,9 +144,6 @@ MAILERS = {
     },
 }
 
-import sys
-TESTING = 'test' in sys.argv
-
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
@@ -154,22 +151,11 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.BasicAuthentication',
     ),
+    'DEFAULT_THROTTLE_RATES': {
+        'login': '5/minute',
+    },
 }
-
-if not TESTING:
-    REST_FRAMEWORK.update({
-        'DEFAULT_THROTTLE_CLASSES': [
-            'rest_framework.throttling.AnonRateThrottle',
-            'rest_framework.throttling.UserRateThrottle'
-        ],
-        'DEFAULT_THROTTLE_RATES': {
-            'anon': '5/minute',
-            'user': '1000/day'
-        }
-    })
 
 from datetime import timedelta
 

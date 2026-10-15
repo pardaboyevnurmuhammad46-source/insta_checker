@@ -12,6 +12,7 @@ from django.db import IntegrityError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from django.contrib.admin.sites import AdminSite
+from rest_framework.test import APIClient
 
 from tracker.models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 from tracker.admin import UniqueLinkAdmin, PostAdmin, InstagramUserAdmin
@@ -604,6 +605,7 @@ class CeleryBeatAndTasksTestCase(TestCase):
 
 class RestApiSecurityTestCase(TestCase):
     def setUp(self):
+        self.client = APIClient()
         self.admin = User.objects.create_superuser(username="admin", password="password123")
         self.ig_user = InstagramUser.objects.create(
             name="Secure User",
@@ -620,7 +622,7 @@ class RestApiSecurityTestCase(TestCase):
         self.assertIn(response.status_code, (401, 403))
 
     def test_api_users_authenticated_admin_success_and_token_not_exposed(self):
-        self.client.force_login(self.admin)
+        self.client.force_authenticate(user=self.admin)
         response = self.client.get("/api/users/")
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -629,6 +631,8 @@ class RestApiSecurityTestCase(TestCase):
         # access_token javobda chiqmasligi kerak (write_only: True)
         first_user = users_list[0]
         self.assertNotIn("access_token", first_user)
+        self.assertIn("has_token", first_user)
+        self.assertTrue(first_user["has_token"])
 
     def test_custom_actions_unauthenticated_forbidden(self):
         resp1 = self.client.post(f"/api/users/{self.ig_user.id}/refresh-token/")
@@ -641,57 +645,101 @@ class RestApiSecurityTestCase(TestCase):
         resp_info = self.client.get("/link/")
         self.assertEqual(resp_info.status_code, 200)
 
+
 class NewApiRequirementsTestCase(TestCase):
     def setUp(self):
+        self.client = APIClient()
         self.admin = User.objects.create_superuser(username="admin_api", password="password123")
-        self.user1 = User.objects.create_user(username="user_api", password="password123")
+        self.regular_user = User.objects.create_user(username="user_api", password="password123")
         
         self.ig_user = InstagramUser.objects.create(
             name="API User",
             ig_user_id="api_123",
             access_token="secret_token",
             status="connected",
+            token_expires_at=timezone.now() + timedelta(days=3),
         )
         dummy = SimpleUploadedFile("s.mp4", b"data", content_type="video/mp4")
-        self.link = UniqueLink.objects.create(user=self.ig_user, video=dummy)
-        self.post = Post.objects.create(link=self.link, status='published')
+        self.link = UniqueLink.objects.create(user=self.ig_user, video=dummy, status='failed')
+        self.post = Post.objects.create(
+            link=self.link,
+            status='failed',
+            views=150,
+            likes=10,
+            comments_count=2,
+            error="API error",
+        )
+        Prize.objects.create(post=self.post, milestone=100)
 
     def test_api_pagination(self):
-        self.client.force_login(self.admin)
+        self.client.force_authenticate(user=self.admin)
         for i in range(55):
-            u = InstagramUser.objects.create(name=f"User {i}")
+            InstagramUser.objects.create(name=f"User {i}")
         response = self.client.get("/api/users/")
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn('count', data)
         self.assertIn('results', data)
-        self.assertEqual(len(data['results']), 50) # Assuming page_size=50
+        self.assertEqual(len(data['results']), 50)
 
     def test_api_read_only_endpoints(self):
-        self.client.force_login(self.admin)
-        # Post and Prize should be read-only
+        self.client.force_authenticate(user=self.admin)
         response = self.client.post("/api/posts/", {"link": self.link.id, "status": "published"})
-        self.assertEqual(response.status_code, 405) # Method Not Allowed
+        self.assertEqual(response.status_code, 405)
+
+        response_prize = self.client.post("/api/prizes/", {"post": self.post.id, "milestone": 500})
+        self.assertEqual(response_prize.status_code, 405)
 
     def test_api_dashboard(self):
-        self.client.force_login(self.admin)
+        self.client.force_authenticate(user=self.admin)
         response = self.client.get("/api/dashboard/")
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertIn('users_by_status', data)
-        self.assertIn('total_metrics', data)
-        self.assertIn('expiring_tokens_count', data)
-        
-    def test_api_jwt_auth(self):
-        # Tokensiz 401
+
+        # Detailed verification of dashboard metrics
+        self.assertEqual(data['users_by_status'].get('connected'), 1)
+        self.assertEqual(data['links_by_status'].get('failed'), 1)
+        self.assertEqual(data['posts_by_status'].get('failed'), 1)
+        self.assertEqual(data['total_metrics']['total_views'], 150)
+        self.assertEqual(data['total_metrics']['total_likes'], 10)
+        self.assertEqual(data['total_metrics']['total_comments'], 2)
+        self.assertEqual(data['total_prizes'], 1)
+        self.assertEqual(data['expiring_tokens_count'], 1)
+
+    def test_api_resend_and_retry(self):
+        self.client.force_authenticate(user=self.admin)
+
+        # Retry post
+        with patch('tracker.views.publish_reels_task.delay') as mock_publish:
+            resp = self.client.post(f"/api/posts/{self.post.id}/retry/")
+            self.assertEqual(resp.status_code, 200)
+            self.post.refresh_from_db()
+            self.assertEqual(self.post.status, 'queued')
+            self.assertIsNone(self.post.error)
+            mock_publish.assert_called_once_with(self.link.id)
+
+        # Resend link
+        resp_link = self.client.post(f"/api/links/{self.link.id}/resend/")
+        self.assertEqual(resp_link.status_code, 200)
+        self.link.refresh_from_db()
+        self.assertEqual(self.link.status, 'pending')
+
+    def test_api_regular_user_forbidden(self):
+        self.client.force_authenticate(user=self.regular_user)
         response = self.client.get("/api/users/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_api_jwt_auth_and_throttling(self):
+        client = APIClient()
+        response = client.get("/api/users/")
         self.assertEqual(response.status_code, 401)
-        
-        # JWT olamiz
-        resp_token = self.client.post("/api/token/", {"username": "admin_api", "password": "password123"})
+
+        # Login to obtain token
+        resp_token = client.post("/api/token/", {"username": "admin_api", "password": "password123"})
         self.assertEqual(resp_token.status_code, 200)
         token = resp_token.json()['access']
-        
-        # Token bilan ruxsat
-        response2 = self.client.get("/api/users/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        # Access with Bearer token
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        response2 = client.get("/api/users/")
         self.assertEqual(response2.status_code, 200)

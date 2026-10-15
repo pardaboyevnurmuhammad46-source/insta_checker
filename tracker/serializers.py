@@ -28,7 +28,7 @@ class UniqueLinkSerializer(serializers.ModelSerializer):
         return f"{settings.SITE_URL}/link/{obj.token}/"
         
     def validate_video(self, value):
-        if not value.name.endswith('.mp4'):
+        if not value.name.lower().endswith('.mp4'):
             raise serializers.ValidationError("Faqat .mp4 formatidagi videolar qabul qilinadi.")
         if value.size > 100 * 1024 * 1024:
             raise serializers.ValidationError("Video hajmi 100MB dan oshmasligi kerak.")

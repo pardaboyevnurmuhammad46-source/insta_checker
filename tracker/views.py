@@ -76,6 +76,8 @@ class UniqueLinkViewSet(viewsets.ModelViewSet):
             return Response({"error": "Faqat failed linkni qayta yuborish mumkin."}, status=status.HTTP_400_BAD_REQUEST)
         link.status = 'pending'
         link.save(update_fields=['status'])
+        if hasattr(link, 'post'):
+            link.post.delete()
         return Response({"message": "Link holati 'pending' ga o'zgartirildi."})
 
 
@@ -224,7 +226,7 @@ def instagram_callback(request):
 
     # Callback link holati va muddatini tekshirish (qayta ishlatilgan yoki muddati o'tgan linklar uchun)
     link_obj = get_object_or_404(UniqueLink, token=state)
-    if link_obj.status in ('posted', 'failed') or hasattr(link_obj, 'post'):
+    if link_obj.status in ('posted', 'failed') or (hasattr(link_obj, 'post') and link_obj.post.status == 'published'):
         return Response({"error": "Bu link allaqachon ishlatilgan."}, status=status.HTTP_400_BAD_REQUEST)
     if link_obj.expires_at and timezone.now() > link_obj.expires_at:
         return Response({"error": "Link muddati tugagan."}, status=status.HTTP_400_BAD_REQUEST)
