@@ -85,7 +85,8 @@ class DataDeletionRequest(models.Model):
 
     confirmation_code = models.CharField(max_length=100, unique=True, db_index=True)
     user_id = models.CharField(max_length=100)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
+    # status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     requested_at = models.DateTimeField(auto_now_add=True)
     details = models.TextField(null=True, blank=True)
 

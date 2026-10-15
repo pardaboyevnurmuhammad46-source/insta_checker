@@ -15,23 +15,51 @@ from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 logger = logging.getLogger(__name__)
 
 
-class InstagramOAuthError(Exception):
+# class InstagramOAuthError(Exception):
+#     pass
+# class InstagramNetworkError(InstagramOAuthError):
+#     pass
+# class InstagramPublishError(Exception):
+#     pass
+# class InstagramMetricsError(Exception):
+#     def __init__(self, message: str, is_deleted: bool = False, is_auth_error: bool = False):
+#         super().__init__(message)
+#         self.is_deleted = is_deleted
+#         self.is_auth_error = is_auth_error
+
+class InstagramBaseError(Exception):
     pass
 
 
-class InstagramNetworkError(InstagramOAuthError):
+class InstagramNetworkError(InstagramBaseError):
     pass
 
 
-class InstagramPublishError(Exception):
+class InstagramOAuthError(InstagramBaseError):
     pass
 
 
-class InstagramMetricsError(Exception):
+class InstagramOAuthNetworkError(InstagramOAuthError, InstagramNetworkError):
+    pass
+
+
+class InstagramPublishError(InstagramBaseError):
+    pass
+
+
+class InstagramPublishNetworkError(InstagramPublishError, InstagramNetworkError):
+    pass
+
+
+class InstagramMetricsError(InstagramBaseError):
     def __init__(self, message: str, is_deleted: bool = False, is_auth_error: bool = False):
         super().__init__(message)
         self.is_deleted = is_deleted
         self.is_auth_error = is_auth_error
+
+
+class InstagramMetricsNetworkError(InstagramMetricsError, InstagramNetworkError):
+    pass
 
 
 class MetaWebhookError(Exception):
@@ -196,7 +224,8 @@ def create_reels_container(ig_user_id: str, video_url: str, access_token: str, c
     try:
         response = requests.post(url, data=payload, timeout=30)
     except requests.RequestException as exc:
-        raise InstagramPublishError(f"Reels container yaratishda tarmoq xatoligi: {exc}") from exc
+        # raise InstagramPublishError(f"Reels container yaratishda tarmoq xatoligi: {exc}") from exc
+        raise InstagramPublishNetworkError(f"Reels container yaratishda tarmoq xatoligi: {exc}") from exc
 
     if response.status_code != 200:
         raise InstagramPublishError(f"Reels container yaratib bo'lmadi: {response.text}")
@@ -216,7 +245,8 @@ def check_container_status(container_id: str, access_token: str) -> dict:
     try:
         response = requests.get(url, params=params, timeout=15)
     except requests.RequestException as exc:
-        raise InstagramPublishError(f"Container holatini tekshirishda xatolik: {exc}") from exc
+        # raise InstagramPublishError(f"Container holatini tekshirishda xatolik: {exc}") from exc
+        raise InstagramPublishNetworkError(f"Container holatini tekshirishda xatolik: {exc}") from exc
 
     if response.status_code != 200:
         raise InstagramPublishError(f"Container holatini olib bo'lmadi: {response.text}")
@@ -234,7 +264,8 @@ def wait_for_container_ready(container_id: str, access_token: str, max_attempts:
             raise InstagramPublishError(f"Reels yuklash xatoligi: {status_data}")
         time.sleep(delay)
 
-    raise InstagramPublishError("Reels videosini qayta ishlash vaqti tugadi (timeout).")
+    # raise InstagramPublishError("Reels videosini qayta ishlash vaqti tugadi (timeout).")
+    raise InstagramPublishNetworkError("Reels videosini qayta ishlash vaqti tugadi (timeout).")
 
 
 def publish_container(ig_user_id: str, container_id: str, access_token: str) -> str:
@@ -246,7 +277,8 @@ def publish_container(ig_user_id: str, container_id: str, access_token: str) -> 
     try:
         response = requests.post(url, data=payload, timeout=30)
     except requests.RequestException as exc:
-        raise InstagramPublishError(f"Reels'ni publish qilishda tarmoq xatoligi: {exc}") from exc
+        # raise InstagramPublishError(f"Reels'ni publish qilishda tarmoq xatoligi: {exc}") from exc
+        raise InstagramPublishNetworkError(f"Reels'ni publish qilishda tarmoq xatoligi: {exc}") from exc
 
     if response.status_code != 200:
         raise InstagramPublishError(f"Reels publish qilinmadi: {response.text}")
@@ -286,6 +318,11 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         raise InstagramPublishError("Joylash uchun video fayl mavjud emas.")
 
     post, _ = Post.objects.get_or_create(link=link)
+    # Idempotentlik: agar post allaqachon published bo'lsa (masalan Celery retry paytida), qayta joylamaymiz
+    if post.status == 'published' and post.ig_media_id:
+        logger.info("Post allaqachon muvaffaqiyatli nashr etilgan (link_id=%s, media_id=%s)", link_id, post.ig_media_id)
+        return post
+
     post.status = 'publishing'
     post.save(update_fields=['status'])
 
@@ -379,7 +416,8 @@ def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str) -> di
     try:
         response = requests.get(media_url, params=params, timeout=15)
     except requests.RequestException as exc:
-        raise InstagramMetricsError(f"Media ma'lumotlarini olishda tarmoq xatoligi: {exc}") from exc
+        # raise InstagramMetricsError(f"Media ma'lumotlarini olishda tarmoq xatoligi: {exc}") from exc
+        raise InstagramMetricsNetworkError(f"Media ma'lumotlarini olishda tarmoq xatoligi: {exc}") from exc
 
     if response.status_code == 404:
         raise InstagramMetricsError(f"Media topilmadi (o'chirilgan bo'lishi mumkin): {response.text}", is_deleted=True)
@@ -579,11 +617,20 @@ def handle_data_deletion_request(user_id: str) -> tuple[str, str]:
     """
     confirmation_code = uuid.uuid4().hex
     users = InstagramUser.objects.filter(ig_user_id=str(user_id))
+    # --- Eski tozalash kodi (komentga olindi):
+    # for user in users:
+    #     user.status = 'needs_reauth'
+    #     user.access_token = None
+    #     user.name = f"Deleted User {user.id}"
+    #     user.save(update_fields=['status', 'access_token', 'name'])
+
     for user in users:
         user.status = 'needs_reauth'
         user.access_token = None
+        user.token_expires_at = None
+        user.ig_user_id = None
         user.name = f"Deleted User {user.id}"
-        user.save(update_fields=['status', 'access_token', 'name'])
+        user.save(update_fields=['status', 'access_token', 'token_expires_at', 'ig_user_id', 'name'])
 
     DataDeletionRequest.objects.create(
         confirmation_code=confirmation_code,

@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 from celery import shared_task
+from django.db import transaction
 from django.utils import timezone
 from .models import InstagramUser, Post
 from .services import (
@@ -9,6 +10,7 @@ from .services import (
     refresh_user_token,
     InstagramPublishError,
     InstagramMetricsError,
+    InstagramNetworkError,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,9 @@ def publish_reels_task(self, link_id: int, caption: str = ''):
         return {"post_id": post.id, "ig_media_id": post.ig_media_id, "status": post.status}
     except InstagramPublishError as exc:
         logger.error("Reels yuklashda xatolik (link_id=%s): %s", link_id, exc)
-        if "tarmoq" in str(exc).lower() or "timeout" in str(exc).lower():
+        # if "tarmoq" in str(exc).lower() or "timeout" in str(exc).lower():
+        #     raise self.retry(exc=exc)
+        if isinstance(exc, InstagramNetworkError):
             raise self.retry(exc=exc)
         return {"error": str(exc), "status": "failed"}
     except Exception as exc:
@@ -60,7 +64,9 @@ def check_post_metrics_task(self, post_id: int):
         return {"error": f"Post #{post_id} topilmadi"}
     except InstagramMetricsError as exc:
         logger.warning("Post statistikasini olishda xatolik (post_id=%s): %s", post_id, exc)
-        if "tarmoq" in str(exc).lower():
+        # if "tarmoq" in str(exc).lower():
+        #     raise self.retry(exc=exc)
+        if isinstance(exc, InstagramNetworkError):
             raise self.retry(exc=exc)
         return {"error": str(exc), "status": "failed"}
     except Exception as exc:
@@ -68,7 +74,7 @@ def check_post_metrics_task(self, post_id: int):
         raise self.retry(exc=exc)
 
 
-from django.db import transaction
+# from django.db import transaction  # tepadagi importlarga ko'chirildi
 
 
 @shared_task

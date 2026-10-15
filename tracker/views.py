@@ -124,7 +124,8 @@ def instagram_callback(request):
     if request.GET.get('error'):
         state = request.GET.get('state')
         if state:
-            UniqueLink.objects.filter(token=state).update(status='failed')
+            # --- Eski kod (komentga olindi): UniqueLink.objects.filter(token=state).update(status='failed')
+            UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
         return Response({
             "error": request.GET.get('error'),
             "reason": request.GET.get('error_reason'),
@@ -140,10 +141,18 @@ def instagram_callback(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Callback link holati va muddatini tekshirish (qayta ishlatilgan yoki muddati o'tgan linklar uchun)
+    link_obj = get_object_or_404(UniqueLink, token=state)
+    if link_obj.status in ('posted', 'failed') or hasattr(link_obj, 'post'):
+        return Response({"error": "Bu link allaqachon ishlatilgan."}, status=status.HTTP_400_BAD_REQUEST)
+    if link_obj.expires_at and timezone.now() > link_obj.expires_at:
+        return Response({"error": "Link muddati tugagan."}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
         user, link = complete_instagram_oauth(code=code, token=state)
     except InstagramOAuthError as exc:
-        UniqueLink.objects.filter(token=state).update(status='failed')
+        # --- Eski kod (komentga olindi): UniqueLink.objects.filter(token=state).update(status='failed')
+        UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
         return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     # Reels videoni Instagram'ga joylash vazifasini Celery orqali ishga tushirish
@@ -165,7 +174,8 @@ def instagram_deauthorize(request):
     Meta Deauthorize Callback URL.
     Foydalanuvchi ilovadan ruxsatni olib tashlaganida Meta tomonidan POST so'rovi yuboriladi.
     """
-    signed_request = request.POST.get('signed_request') or request.data.get('signed_request')
+    # --- Eski kod (komentga olindi): signed_request = request.POST.get('signed_request') or request.data.get('signed_request')
+    signed_request = request.data.get('signed_request')
     if not signed_request:
         return Response(
             {"error": "'signed_request' parametri talab qilinadi."},
@@ -197,7 +207,8 @@ def instagram_data_deletion(request):
     Meta foydalanuvchi ma'lumotlarini o'chirish so'rovini yuboradi.
     Meta formati bo'yicha javob qaytaramiz: {"url": "...", "confirmation_code": "..."}
     """
-    signed_request = request.POST.get('signed_request') or request.data.get('signed_request')
+    # --- Eski kod (komentga olindi): signed_request = request.POST.get('signed_request') or request.data.get('signed_request')
+    signed_request = request.data.get('signed_request')
     if not signed_request:
         return Response(
             {"error": "'signed_request' parametri talab qilinadi."},
@@ -228,10 +239,20 @@ def data_deletion_status(request, confirmation_code):
     Foydalanuvchi o'z ma'lumotlari o'chirilganligini tekshirishi mumkin bo'lgan sahifa / API.
     """
     record = get_object_or_404(DataDeletionRequest, confirmation_code=confirmation_code)
+
+    # --- Eski qotirib yozilgan xabar (komentga olindi):
+    # message = "Instagram hisobingizga oid saqlangan ma'lumotlar to'liq o'chirildi."
+    if record.status == 'completed':
+        message = "Instagram hisobingizga oid saqlangan ma'lumotlar to'liq o'chirildi."
+    elif record.status == 'failed':
+        message = "Ma'lumotlarni o'chirish jarayonida xatolik yuz berdi. Iltimos qayta murojaat qiling."
+    else:
+        message = "Ma'lumotlarni o'chirish so'rovi qabul qilindi va ko'rib chiqilmoqda."
+
     return Response({
         "confirmation_code": record.confirmation_code,
         "user_id": record.user_id,
         "status": record.status,
         "requested_at": record.requested_at,
-        "message": "Instagram hisobingizga oid saqlangan ma'lumotlar to'liq o'chirildi.",
+        "message": message,
     }, status=status.HTTP_200_OK)

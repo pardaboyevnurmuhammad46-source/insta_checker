@@ -19,7 +19,9 @@ from tracker.services import (
     InstagramOAuthError,
     InstagramNetworkError,
     InstagramPublishError,
+    InstagramPublishNetworkError,
     InstagramMetricsError,
+    InstagramMetricsNetworkError,
     MetaWebhookError,
     build_instagram_auth_url,
     complete_instagram_oauth,
@@ -255,6 +257,29 @@ class ReelsPublishingTestCase(TestCase):
         result = publish_reels_task(self.link.id)
         self.assertEqual(result.get('status'), 'published')
         self.assertEqual(result.get('ig_media_id'), 'media_1')
+
+    @patch('tracker.services.create_reels_container')
+    def test_publish_reels_idempotency(self, mock_create):
+        # Post allaqachon published holatda
+        post = Post.objects.create(
+            link=self.link,
+            ig_media_id="existing_media_111",
+            status='published',
+        )
+        returned_post = publish_reels_for_link(self.link.id)
+        # Qayta create_reels_container chaqirilmasligi kerak
+        mock_create.assert_not_called()
+        self.assertEqual(returned_post.id, post.id)
+        self.assertEqual(returned_post.ig_media_id, "existing_media_111")
+
+    @patch('tracker.tasks.publish_reels_for_link')
+    def test_publish_reels_task_retries_on_network_error(self, mock_publish):
+        mock_publish.side_effect = InstagramPublishNetworkError("Tarmoq uzildi")
+        with patch.object(publish_reels_task, 'retry') as mock_retry:
+            mock_retry.side_effect = Exception("Retry called")
+            with self.assertRaises(Exception):
+                publish_reels_task(self.link.id)
+            mock_retry.assert_called_once()
 
 
 class AdaptiveScheduleTestCase(TestCase):
