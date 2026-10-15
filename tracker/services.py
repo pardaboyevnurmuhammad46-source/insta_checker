@@ -1,10 +1,18 @@
+import base64
+import hashlib
+import hmac
+import json
+import logging
 import time
 import urllib.parse
+import uuid
 from datetime import timedelta
 import requests
 from django.conf import settings
 from django.utils import timezone
-from .models import InstagramUser, UniqueLink, Post
+from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+
+logger = logging.getLogger(__name__)
 
 
 class InstagramOAuthError(Exception):
@@ -14,6 +22,21 @@ class InstagramOAuthError(Exception):
 class InstagramPublishError(Exception):
     pass
 
+
+class InstagramMetricsError(Exception):
+    def __init__(self, message: str, is_deleted: bool = False, is_auth_error: bool = False):
+        super().__init__(message)
+        self.is_deleted = is_deleted
+        self.is_auth_error = is_auth_error
+
+
+class MetaWebhookError(Exception):
+    pass
+
+
+# ==========================================
+# 1. Instagram OAuth & Token boshqaruvi
+# ==========================================
 
 def build_instagram_auth_url(token: str) -> str:
     base_url = "https://api.instagram.com/oauth/authorize"
@@ -68,13 +91,59 @@ def get_long_lived_token(short_lived_token: str) -> dict:
     return response.json()
 
 
+def refresh_instagram_access_token(access_token: str) -> dict:
+    """
+    60 kunlik uzoq muddatli tokenni muddati tugashidan oldin yangilash (Graph API refresh_access_token).
+    """
+    url = "https://graph.instagram.com/refresh_access_token"
+    params = {
+        'grant_type': 'ig_refresh_token',
+        'access_token': access_token,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise InstagramOAuthError(f"Token yangilashda tarmoq xatoligi: {exc}") from exc
+
+    if response.status_code != 200:
+        raise InstagramOAuthError(f"Token yangilab bo'lmadi: {response.text}")
+
+    return response.json()
+
+
+def refresh_user_token(user: InstagramUser) -> bool:
+    """
+    InstagramUser uchun tokenni yangilaydi va saqlaydi.
+    Agar token bekor qilingan bo'lsa, foydalanuvchini 'needs_reauth' holatiga o'tkazadi.
+    """
+    if not user.access_token:
+        return False
+
+    try:
+        data = refresh_instagram_access_token(user.access_token)
+        new_token = data.get('access_token')
+        expires_in = data.get('expires_in', 5184000)
+        if new_token:
+            user.access_token = new_token
+        user.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
+        user.status = 'connected'
+        user.save(update_fields=['access_token', 'token_expires_at', 'status'])
+        logger.info("InstagramUser token yangilandi: user_id=%s", user.id)
+        return True
+    except InstagramOAuthError as exc:
+        logger.warning("Foydalanuvchi tokenini yangilab bo'lmadi (user_id=%s): %s", user.id, exc)
+        user.status = 'needs_reauth'
+        user.save(update_fields=['status'])
+        return False
+
+
 def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, UniqueLink]:
     try:
         link = UniqueLink.objects.select_related('user').get(token=token)
     except UniqueLink.DoesNotExist as exc:
         raise InstagramOAuthError("Bunday unikal link topilmadi.") from exc
 
-    # 1. Kodni qisqa muddatli tokenga almashtirish
     token_data = exchange_code_for_token(code)
     short_lived_token = token_data.get('access_token')
     ig_user_id = str(token_data.get('user_id', ''))
@@ -82,7 +151,6 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
     if not short_lived_token:
         raise InstagramOAuthError("Instagram javobida access_token mavjud emas.")
 
-    # 2. 60 kunlik uzoq muddatli tokenga almashtirish
     try:
         long_token_data = get_long_lived_token(short_lived_token)
         final_token = long_token_data.get('access_token', short_lived_token)
@@ -91,7 +159,6 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
         final_token = short_lived_token
         expires_in = 3600
 
-    # 3. InstagramUser ma'lumotlarini yangilash
     user = link.user
     user.ig_user_id = ig_user_id or user.ig_user_id
     user.access_token = final_token
@@ -99,13 +166,16 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
     user.status = 'connected'
     user.save(update_fields=['ig_user_id', 'access_token', 'token_expires_at', 'status'])
 
-    # 4. Link holatini belgilash
     if link.status == 'pending':
         link.status = 'opened'
         link.save(update_fields=['status'])
 
     return user, link
 
+
+# ==========================================
+# 2. Instagram Reels joylash (Publishing)
+# ==========================================
 
 def create_reels_container(ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
     url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media"
@@ -234,7 +304,7 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         post.permalink = permalink
         post.status = 'published'
         post.posted_at = timezone.now()
-        post.next_check_at = timezone.now() + timedelta(minutes=15)
+        post.next_check_at = calculate_next_check(post)
         post.error = None
         post.save(update_fields=['ig_media_id', 'permalink', 'status', 'posted_at', 'next_check_at', 'error'])
 
@@ -251,3 +321,273 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         link.status = 'failed'
         link.save(update_fields=['status'])
         raise
+
+
+# ==========================================
+# 3. Adaptiv jadval va Metrikalarni tekshirish
+# ==========================================
+
+def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
+    """
+    Post yoshiga qarab keyingi tekshirish vaqtini adaptiv hisoblaydi:
+    - 0 .. 24 soat: har 15 daqiqada
+    - 1 .. 3 kun: har 1 soatda
+    - 3 .. 7 kun: har 4 soatda
+    - 7 .. 14 kun: har 12 soatda
+    - 14 .. 30 kun: har 24 soatda (kuniga 1 marta)
+    - > 30 kun: tekshirish yakunlanadi (None)
+    """
+    if post.status != 'published' or not post.posted_at:
+        return None
+
+    if now is None:
+        now = timezone.now()
+
+    age = now - post.posted_at
+    if age < timedelta(0):
+        return now + timedelta(minutes=15)
+
+    if age < timedelta(hours=24):
+        return now + timedelta(minutes=15)
+    elif age < timedelta(days=3):
+        return now + timedelta(hours=1)
+    elif age < timedelta(days=7):
+        return now + timedelta(hours=4)
+    elif age < timedelta(days=14):
+        return now + timedelta(hours=12)
+    elif age < timedelta(days=30):
+        return now + timedelta(days=1)
+    else:
+        return None
+
+
+def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str) -> dict:
+    """
+    Instagram Graph API orqali media metrikalarini (likes, comments, views) oladi.
+    """
+    media_url = f"https://graph.instagram.com/v21.0/{ig_media_id}"
+    params = {
+        'fields': 'like_count,comments_count,media_type',
+        'access_token': access_token,
+    }
+
+    try:
+        response = requests.get(media_url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        raise InstagramMetricsError(f"Media ma'lumotlarini olishda tarmoq xatoligi: {exc}") from exc
+
+    if response.status_code == 404:
+        raise InstagramMetricsError(f"Media topilmadi (o'chirilgan bo'lishi mumkin): {response.text}", is_deleted=True)
+
+    if response.status_code != 200:
+        is_auth_error = False
+        is_deleted = False
+        try:
+            err_data = response.json().get('error', {})
+            err_code = err_data.get('code')
+            if err_code == 190:
+                is_auth_error = True
+            elif err_code == 100 and err_data.get('error_subcode') == 33:
+                is_deleted = True
+        except Exception:
+            pass
+
+        raise InstagramMetricsError(
+            f"Media metrikalarini olib bo'lmadi: {response.text}",
+            is_deleted=is_deleted,
+            is_auth_error=is_auth_error,
+        )
+
+    data = response.json()
+    likes = data.get('like_count', 0)
+    comments = data.get('comments_count', 0)
+
+    # Reels Insights: views yoki plays ni olish
+    views = 0
+    insights_url = f"https://graph.instagram.com/v21.0/{ig_media_id}/insights"
+    for metric_name in ('views', 'plays'):
+        try:
+            ins_resp = requests.get(
+                insights_url,
+                params={'metric': metric_name, 'access_token': access_token},
+                timeout=15,
+            )
+            if ins_resp.status_code == 200:
+                ins_data = ins_resp.json().get('data', [])
+                for item in ins_data:
+                    if item.get('name') == metric_name:
+                        values = item.get('values', [])
+                        if values and isinstance(values, list):
+                            views = values[0].get('value', 0)
+                        elif 'total_value' in item:
+                            views = item.get('total_value', {}).get('value', 0)
+                        break
+                if views > 0:
+                    break
+        except requests.RequestException:
+            pass
+
+    return {
+        'likes': int(likes or 0),
+        'comments_count': int(comments or 0),
+        'views': int(views or 0),
+    }
+
+
+def update_post_metrics(post: Post) -> Post:
+    """
+    Post statistikasini Instagram'dan tortib oladi, bazani yangilaydi va sovrinlarni tekshiradi.
+    """
+    user = post.link.user
+    if not user.access_token or user.status != 'connected':
+        post.error = "Foydalanuvchi akkaunti ulanmagan yoki token mavjud emas."
+        post.next_check_at = None
+        post.save(update_fields=['error', 'next_check_at'])
+        return post
+
+    try:
+        metrics = fetch_post_metrics_from_instagram(post.ig_media_id, user.access_token)
+        post.likes = metrics['likes']
+        post.comments_count = metrics['comments_count']
+        if metrics['views'] > 0 or post.views == 0:
+            post.views = metrics['views']
+
+        post.last_checked_at = timezone.now()
+        post.next_check_at = calculate_next_check(post)
+        post.error = None
+        post.save(update_fields=['likes', 'comments_count', 'views', 'last_checked_at', 'next_check_at', 'error'])
+
+        # Sovrin berish logikasi
+        check_and_award_prizes(post)
+        return post
+
+    except InstagramMetricsError as exc:
+        if exc.is_deleted:
+            post.status = 'deleted'
+            post.next_check_at = None
+            post.error = "Instagram'dan post o'chirilgan."
+            post.save(update_fields=['status', 'next_check_at', 'error'])
+        elif exc.is_auth_error:
+            user.status = 'needs_reauth'
+            user.save(update_fields=['status'])
+            post.error = "Instagram tokeni yaroqsiz (needs_reauth)."
+            post.next_check_at = None
+            post.save(update_fields=['error', 'next_check_at'])
+        else:
+            post.error = str(exc)
+            post.next_check_at = timezone.now() + timedelta(minutes=30)
+            post.save(update_fields=['error', 'next_check_at'])
+        return post
+
+
+# ==========================================
+# 4. Sovrinlar (Prize) berish logikasi
+# ==========================================
+
+DEFAULT_PRIZE_MILESTONES = [500, 1000, 5000, 10000, 50000, 100000]
+
+
+def get_configured_milestones() -> list[int]:
+    raw = getattr(settings, 'PRIZE_MILESTONES', None)
+    if not raw:
+        return DEFAULT_PRIZE_MILESTONES
+    if isinstance(raw, (list, tuple)):
+        return [int(x) for x in raw]
+    if isinstance(raw, str):
+        return [int(x.strip()) for x in raw.split(',') if x.strip().isdigit()]
+    return DEFAULT_PRIZE_MILESTONES
+
+
+def check_and_award_prizes(post: Post) -> list[Prize]:
+    """
+    Post ko'rishlar soni (views) marralarga (milestones) yetganida Prize yozuvini yaratadi.
+    """
+    milestones = get_configured_milestones()
+    awarded = []
+    for milestone in sorted(milestones):
+        if post.views >= milestone:
+            prize, created = Prize.objects.get_or_create(
+                post=post,
+                milestone=milestone,
+                defaults={'sent_at': timezone.now()},
+            )
+            if created:
+                awarded.append(prize)
+                logger.info("Yangi sovrin berildi: post_id=%s, milestone=%s", post.id, milestone)
+    return awarded
+
+
+# ==========================================
+# 5. Meta Deauthorize & Data Deletion
+# ==========================================
+
+def parse_signed_request(signed_request: str, app_secret: str) -> dict:
+    """
+    Meta signed_request parametrini tahlil qiladi va imzosini tekshiradi (HMAC-SHA256).
+    """
+    if not signed_request or '.' not in signed_request:
+        raise MetaWebhookError("Noto'g'ri signed_request formati.")
+
+    try:
+        encoded_sig, payload = signed_request.split('.', 1)
+        sig_padding = '=' * (-len(encoded_sig) % 4)
+        sig = base64.urlsafe_b64decode(encoded_sig + sig_padding)
+
+        payload_padding = '=' * (-len(payload) % 4)
+        data_json = base64.urlsafe_b64decode(payload + payload_padding).decode('utf-8')
+        data = json.loads(data_json)
+    except Exception as exc:
+        raise MetaWebhookError(f"signed_request dekodlashda xatolik: {exc}") from exc
+
+    if not app_secret:
+        raise MetaWebhookError("INSTAGRAM_APP_SECRET sozlanmagan.")
+
+    expected_sig = hmac.new(
+        app_secret.encode('utf-8'),
+        payload.encode('utf-8'),
+        hashlib.sha256,
+    ).digest()
+
+    if not hmac.compare_digest(sig, expected_sig):
+        raise MetaWebhookError("Imzo mos kelmadi (invalid signature).")
+
+    return data
+
+
+def handle_deauthorize_request(user_id: str) -> int:
+    """
+    Foydalanuvchi ilovadan ruxsatni bekor qilganda chaqiriladi.
+    Statusni 'needs_reauth' qiladi va tokenni tozalaydi.
+    """
+    updated_count = InstagramUser.objects.filter(ig_user_id=str(user_id)).update(
+        status='needs_reauth',
+        access_token=None,
+    )
+    logger.info("Foydalanuvchi deautorizatsiya qilindi: ig_user_id=%s, soni=%s", user_id, updated_count)
+    return updated_count
+
+
+def handle_data_deletion_request(user_id: str) -> tuple[str, str]:
+    """
+    Meta Data Deletion Request callback mantiqi.
+    Qaytaradi: (tracking_url, confirmation_code)
+    """
+    confirmation_code = uuid.uuid4().hex
+    users = InstagramUser.objects.filter(ig_user_id=str(user_id))
+    for user in users:
+        user.status = 'needs_reauth'
+        user.access_token = None
+        user.name = f"Deleted User {user.id}"
+        user.save(update_fields=['status', 'access_token', 'name'])
+
+    DataDeletionRequest.objects.create(
+        confirmation_code=confirmation_code,
+        user_id=str(user_id),
+        status='completed',
+        details="Foydalanuvchi shaxsiy ma'lumotlari Meta so'rovi bo'yicha tozalandi.",
+    )
+
+    site_url = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
+    status_url = f"{site_url}/oauth/data-deletion/status/{confirmation_code}/"
+    logger.info("Data deletion yakunlandi: ig_user_id=%s, code=%s", user_id, confirmation_code)
+    return status_url, confirmation_code

@@ -1,6 +1,15 @@
 import logging
+from datetime import timedelta
 from celery import shared_task
-from .services import publish_reels_for_link, InstagramPublishError
+from django.utils import timezone
+from .models import InstagramUser, Post
+from .services import (
+    publish_reels_for_link,
+    update_post_metrics,
+    refresh_user_token,
+    InstagramPublishError,
+    InstagramMetricsError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,3 +29,85 @@ def publish_reels_task(self, link_id: int, caption: str = ''):
     except Exception as exc:
         logger.exception("Kutilmagan xatolik (link_id=%s): %s", link_id, exc)
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=60)
+def check_post_metrics_task(self, post_id: int):
+    """
+    Bitta post uchun Instagram metrikalarini (views, likes, comments) yangilaydi.
+    """
+    logger.info("Post statistikasini tekshirish boshlandi: post_id=%s", post_id)
+    try:
+        post = Post.objects.select_related('link__user').get(id=post_id)
+        updated_post = update_post_metrics(post)
+        logger.info(
+            "Post statistikasi yangilandi: post_id=%s, views=%s, likes=%s, comments=%s, status=%s",
+            updated_post.id,
+            updated_post.views,
+            updated_post.likes,
+            updated_post.comments_count,
+            updated_post.status,
+        )
+        return {
+            "post_id": updated_post.id,
+            "views": updated_post.views,
+            "likes": updated_post.likes,
+            "comments_count": updated_post.comments_count,
+            "status": updated_post.status,
+        }
+    except Post.DoesNotExist:
+        logger.warning("Post topilmadi: post_id=%s", post_id)
+        return {"error": f"Post #{post_id} topilmadi"}
+    except InstagramMetricsError as exc:
+        logger.warning("Post statistikasini olishda xatolik (post_id=%s): %s", post_id, exc)
+        if "tarmoq" in str(exc).lower():
+            raise self.retry(exc=exc)
+        return {"error": str(exc), "status": "failed"}
+    except Exception as exc:
+        logger.exception("Kutilmagan xatolik post statistikasini tekshirishda (post_id=%s): %s", post_id, exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task
+def check_all_due_posts_task():
+    """
+    next_check_at vaqti kelgan barcha faol (published) postlar uchun fonda tekshiruv vazifalarini ishga tushiradi.
+    """
+    now = timezone.now()
+    due_post_ids = list(
+        Post.objects.filter(
+            status='published',
+            next_check_at__lte=now,
+        ).values_list('id', flat=True)
+    )
+
+    logger.info("Vaqti yetgan postlar tekshiruvi: %d ta post topildi", len(due_post_ids))
+    for post_id in due_post_ids:
+        check_post_metrics_task.delay(post_id)
+
+    return {"due_posts_count": len(due_post_ids), "post_ids": due_post_ids}
+
+
+@shared_task
+def refresh_expiring_tokens_task():
+    """
+    Muddati 14 kun ichida tugaydigan bog'langan Instagram akkauntlari tokenlarini avtomatik yangilaydi.
+    """
+    threshold = timezone.now() + timedelta(days=14)
+    expiring_users = InstagramUser.objects.filter(
+        status='connected',
+        token_expires_at__lte=threshold,
+    ).exclude(access_token__isnull=True).exclude(access_token='')
+
+    refreshed_count = 0
+    failed_count = 0
+
+    for user in expiring_users:
+        success = refresh_user_token(user)
+        if success:
+            refreshed_count += 1
+        else:
+            failed_count += 1
+
+    logger.info("Tokenlarni yangilash yakunlandi: muvaffaqiyatli=%d, xato=%d", refreshed_count, failed_count)
+    return {"refreshed_count": refreshed_count, "failed_count": failed_count}

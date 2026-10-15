@@ -154,6 +154,26 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    # Har 5 daqiqada tekshirish vaqti yetgan postlarni aniqlash va tekshiruvga yuborish
+    'check-all-due-posts-metrics': {
+        'task': 'tracker.tasks.check_all_due_posts_task',
+        'schedule': 300.0,
+    },
+    # Har kuni soat 03:00 da muddati 14 kundan kam qolgan tokenlarni yangilash
+    'refresh-expiring-instagram-tokens': {
+        'task': 'tracker.tasks.refresh_expiring_tokens_task',
+        'schedule': crontab(hour=3, minute=0),
+    },
+}
+
 SITE_URL = os.getenv('SITE_URL', 'http://127.0.0.1:8000')
+
+# Sovrinlar (Prize) marralari (ko'rishlar soni bo'yicha)
+raw_milestones = os.getenv('PRIZE_MILESTONES', '500,1000,5000,10000,50000,100000')
+PRIZE_MILESTONES = [int(m.strip()) for m in raw_milestones.split(',') if m.strip().isdigit()]
+
 
 

@@ -55,3 +55,8 @@ celerybeat.pid
 # OS generated
 .DS_Store
 Thumbs.db
+.env
+venv/
+__pycache__/
+*.pyc
+media/

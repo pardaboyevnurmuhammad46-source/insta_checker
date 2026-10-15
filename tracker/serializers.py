@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import InstagramUser, UniqueLink, Post, Prize
+from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 
 
 class InstagramUserSerializer(serializers.ModelSerializer):
@@ -25,3 +25,10 @@ class PrizeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Prize
         fields = '__all__'
+
+
+class DataDeletionRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DataDeletionRequest
+        fields = '__all__'
+

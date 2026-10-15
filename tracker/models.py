@@ -74,3 +74,21 @@ class Prize(models.Model):
 
     def __str__(self):
         return f"Prize {self.milestone} - Post #{self.post_id}"
+
+
+class DataDeletionRequest(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    )
+
+    confirmation_code = models.CharField(max_length=100, unique=True, db_index=True)
+    user_id = models.CharField(max_length=100)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
+    requested_at = models.DateTimeField(auto_now_add=True)
+    details = models.TextField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Deletion {self.confirmation_code} (User {self.user_id})"
+
