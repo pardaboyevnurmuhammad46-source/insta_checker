@@ -1,18 +1,27 @@
 from rest_framework import serializers
-from .models import UserLink, VideoTemplate, InstagramPost
+from .models import InstagramUser, UniqueLink, Post, Prize
 
-class VideoTemplateSerializer(serializers.ModelSerializer):
+
+class InstagramUserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = VideoTemplate
+        model = InstagramUser
         fields = '__all__'
 
-class UserLinkSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = UserLink
-        fields = ['id', 'unique_token', 'video_template', 'created_at']
-        read_only_fields = ['unique_token']
 
-class InstagramPostSerializer(serializers.ModelSerializer):
+class UniqueLinkSerializer(serializers.ModelSerializer):
     class Meta:
-        model = InstagramPost
+        model = UniqueLink
+        fields = '__all__'
+        read_only_fields = ['token']
+
+
+class PostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Post
+        fields = '__all__'
+
+
+class PrizeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Prize
         fields = '__all__'

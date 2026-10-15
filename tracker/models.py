@@ -1,37 +1,76 @@
 import uuid
 from django.db import models
 
-class VideoTemplate(models.Model):
-    title = models.CharField(max_length=255)
-    video_file = models.FileField(upload_to='videos/')
+
+class InstagramUser(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('connected', 'Connected'),
+        ('needs_reauth', 'Needs Reauth'),
+    )
+
+    name = models.CharField(max_length=255)
+    ig_user_id = models.CharField(max_length=100, null=True, blank=True)
+    access_token = models.TextField(null=True, blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.title
+        return self.name
 
-class UserLink(models.Model):
-    unique_token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+class UniqueLink(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('opened', 'Opened'),
+        ('posted', 'Posted'),
+        ('failed', 'Failed'),
+    )
+
+    user = models.ForeignKey(InstagramUser, on_delete=models.CASCADE, related_name='links')
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    video = models.FileField(upload_to='videos/')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    video_template = models.ForeignKey(VideoTemplate, on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
-        return str(self.unique_token)
+        return f"{self.user.name} ({self.token})"
 
-class InstagramPost(models.Model):
-    user_link = models.ForeignKey(UserLink, on_delete=models.CASCADE, related_name='posts')
-    ig_post_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
-    post_url = models.URLField(null=True, blank=True)
-    views = models.IntegerField(default=0)
-    likes = models.IntegerField(default=0)
-    comments = models.IntegerField(default=0)
-    is_deleted = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    last_checked_at = models.DateTimeField(auto_now=True)
-    
-    # Milestones
-    milestone_500_reached = models.BooleanField(default=False)
-    milestone_1000_reached = models.BooleanField(default=False)
-    milestone_5000_reached = models.BooleanField(default=False)
+
+class Post(models.Model):
+    STATUS_CHOICES = (
+        ('queued', 'Queued'),
+        ('publishing', 'Publishing'),
+        ('published', 'Published'),
+        ('deleted', 'Deleted'),
+        ('failed', 'Failed'),
+    )
+
+    link = models.OneToOneField(UniqueLink, on_delete=models.CASCADE, related_name='post')
+    ig_media_id = models.CharField(max_length=100, null=True, blank=True)
+    permalink = models.URLField(max_length=500, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='queued')
+    posted_at = models.DateTimeField(null=True, blank=True)
+    views = models.PositiveIntegerField(default=0)
+    likes = models.PositiveIntegerField(default=0)
+    comments_count = models.PositiveIntegerField(default=0)
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    next_check_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    error = models.TextField(null=True, blank=True)
 
     def __str__(self):
-        return f"Post {self.ig_post_id or 'Pending'} - {self.views} views"
+        return f"Post: {self.link.user.name} ({self.status})"
+
+
+class Prize(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='prizes')
+    milestone = models.PositiveIntegerField()
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('post', 'milestone')
+
+    def __str__(self):
+        return f"Prize {self.milestone} - Post #{self.post_id}"

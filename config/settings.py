@@ -139,3 +139,10 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# Instagram OAuth
+INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID', '')
+INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET', '')
+INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', 'http://127.0.0.1:8000/oauth/callback/')
+INSTAGRAM_SCOPE = os.getenv('INSTAGRAM_SCOPE', 'user_profile,user_media')
+
