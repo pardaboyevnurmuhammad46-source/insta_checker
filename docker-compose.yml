@@ -21,6 +21,7 @@ services:
     build: .
     command: /app/entrypoint.sh
     volumes:
+      - .:/app
       - media_volume:/app/media
       - static_volume:/app/static
     ports:
@@ -40,6 +41,7 @@ services:
     build: .
     command: celery -A config worker -l info
     volumes:
+      - .:/app
       - media_volume:/app/media
     env_file: .env
     environment:
@@ -53,6 +55,8 @@ services:
   beat:
     build: .
     command: celery -A config beat -l info
+    volumes:
+      - .:/app
     env_file: .env
     environment:
       - DB_HOST=db
@@ -65,12 +69,12 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
+      - "${NGINX_PORT:-8080}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - media_volume:/app/media
       - static_volume:/app/static
-      # - ../frontend/dist:/usr/share/nginx/html # un-comment when frontend is built
+      - ./frontend/dist:/usr/share/nginx/html
     depends_on:
       - web
 
