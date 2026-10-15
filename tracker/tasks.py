@@ -74,7 +74,6 @@ def check_post_metrics_task(self, post_id: int):
         raise self.retry(exc=exc)
 
 
-# from django.db import transaction  # tepadagi importlarga ko'chirildi
 
 
 @shared_task

@@ -640,3 +640,58 @@ class RestApiSecurityTestCase(TestCase):
     def test_public_endpoints_accessible_without_auth(self):
         resp_info = self.client.get("/link/")
         self.assertEqual(resp_info.status_code, 200)
+
+class NewApiRequirementsTestCase(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser(username="admin_api", password="password123")
+        self.user1 = User.objects.create_user(username="user_api", password="password123")
+        
+        self.ig_user = InstagramUser.objects.create(
+            name="API User",
+            ig_user_id="api_123",
+            access_token="secret_token",
+            status="connected",
+        )
+        dummy = SimpleUploadedFile("s.mp4", b"data", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.ig_user, video=dummy)
+        self.post = Post.objects.create(link=self.link, status='published')
+
+    def test_api_pagination(self):
+        self.client.force_login(self.admin)
+        for i in range(55):
+            u = InstagramUser.objects.create(name=f"User {i}")
+        response = self.client.get("/api/users/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('count', data)
+        self.assertIn('results', data)
+        self.assertEqual(len(data['results']), 50) # Assuming page_size=50
+
+    def test_api_read_only_endpoints(self):
+        self.client.force_login(self.admin)
+        # Post and Prize should be read-only
+        response = self.client.post("/api/posts/", {"link": self.link.id, "status": "published"})
+        self.assertEqual(response.status_code, 405) # Method Not Allowed
+
+    def test_api_dashboard(self):
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/dashboard/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('users_by_status', data)
+        self.assertIn('total_metrics', data)
+        self.assertIn('expiring_tokens_count', data)
+        
+    def test_api_jwt_auth(self):
+        # Tokensiz 401
+        response = self.client.get("/api/users/")
+        self.assertEqual(response.status_code, 401)
+        
+        # JWT olamiz
+        resp_token = self.client.post("/api/token/", {"username": "admin_api", "password": "password123"})
+        self.assertEqual(resp_token.status_code, 200)
+        token = resp_token.json()['access']
+        
+        # Token bilan ruxsat
+        response2 = self.client.get("/api/users/", HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertEqual(response2.status_code, 200)

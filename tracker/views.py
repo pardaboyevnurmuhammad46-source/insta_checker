@@ -2,10 +2,15 @@ from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db.models import Count, Sum
+from datetime import timedelta
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, action, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 from .serializers import (
@@ -28,9 +33,20 @@ from .services import (
 from .tasks import publish_reels_task, check_post_metrics_task
 
 
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class InstagramUserViewSet(viewsets.ModelViewSet):
     queryset = InstagramUser.objects.all()
     serializer_class = InstagramUserSerializer
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status']
+    search_fields = ['name', 'ig_user_id']
+    ordering_fields = ['created_at']
 
     @action(detail=True, methods=['post'], url_path='refresh-token')
     def refresh_token(self, request, pk=None):
@@ -45,29 +61,95 @@ class InstagramUserViewSet(viewsets.ModelViewSet):
 
 
 class UniqueLinkViewSet(viewsets.ModelViewSet):
-    queryset = UniqueLink.objects.all()
+    queryset = UniqueLink.objects.select_related('user').all()
     serializer_class = UniqueLinkSerializer
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'user']
+    search_fields = ['user__name']
+    ordering_fields = ['created_at']
+
+    @action(detail=True, methods=['post'], url_path='resend')
+    def resend(self, request, pk=None):
+        link = self.get_object()
+        if link.status != 'failed':
+            return Response({"error": "Faqat failed linkni qayta yuborish mumkin."}, status=status.HTTP_400_BAD_REQUEST)
+        link.status = 'pending'
+        link.save(update_fields=['status'])
+        return Response({"message": "Link holati 'pending' ga o'zgartirildi."})
 
 
-class PostViewSet(viewsets.ModelViewSet):
-    queryset = Post.objects.all()
+class PostViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Post.objects.select_related('link__user').all()
     serializer_class = PostSerializer
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'link__user']
+    search_fields = ['link__user__name', 'ig_media_id']
+    ordering_fields = ['views', 'posted_at']
 
     @action(detail=True, methods=['post'], url_path='check-metrics')
     def check_metrics(self, request, pk=None):
         post = self.get_object()
         task = check_post_metrics_task.delay(post.id)
         return Response({"message": "Post statistikasini tekshirish vazifasi navbatga qo'yildi.", "task_id": task.id})
+        
+    @action(detail=True, methods=['post'], url_path='retry')
+    def retry(self, request, pk=None):
+        post = self.get_object()
+        if post.status != 'failed':
+            return Response({"error": "Faqat failed postni qayta joylash mumkin."}, status=status.HTTP_400_BAD_REQUEST)
+        post.status = 'queued'
+        post.error = None
+        post.save(update_fields=['status', 'error'])
+        publish_reels_task.delay(post.link.id)
+        return Response({"message": "Post qayta joylash uchun navbatga qo'yildi."})
 
 
-class PrizeViewSet(viewsets.ModelViewSet):
-    queryset = Prize.objects.all()
+class PrizeViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Prize.objects.select_related('post__link__user').all()
     serializer_class = PrizeSerializer
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    ordering_fields = ['sent_at', 'milestone']
 
 
 class DataDeletionRequestViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DataDeletionRequest.objects.all().order_by('-requested_at')
     serializer_class = DataDeletionRequestSerializer
+    pagination_class = StandardResultsSetPagination
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def dashboard_stats(request):
+    users_by_status = InstagramUser.objects.values('status').annotate(count=Count('id'))
+    links_by_status = UniqueLink.objects.values('status').annotate(count=Count('id'))
+    posts_by_status = Post.objects.values('status').annotate(count=Count('id'))
+    
+    total_metrics = Post.objects.aggregate(
+        total_views=Sum('views'),
+        total_likes=Sum('likes'),
+        total_comments=Sum('comments_count')
+    )
+    
+    total_prizes = Prize.objects.count()
+    
+    seven_days_from_now = timezone.now() + timedelta(days=7)
+    expiring_tokens_count = InstagramUser.objects.filter(
+        token_expires_at__isnull=False,
+        token_expires_at__lte=seven_days_from_now,
+        status='connected'
+    ).count()
+    
+    return Response({
+        "users_by_status": {item['status']: item['count'] for item in users_by_status},
+        "links_by_status": {item['status']: item['count'] for item in links_by_status},
+        "posts_by_status": {item['status']: item['count'] for item in posts_by_status},
+        "total_metrics": total_metrics,
+        "total_prizes": total_prizes,
+        "expiring_tokens_count": expiring_tokens_count,
+    })
 
 
 @api_view(['GET'])
@@ -124,7 +206,6 @@ def instagram_callback(request):
     if request.GET.get('error'):
         state = request.GET.get('state')
         if state:
-            # --- Eski kod (komentga olindi): UniqueLink.objects.filter(token=state).update(status='failed')
             UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
         return Response({
             "error": request.GET.get('error'),
@@ -151,7 +232,6 @@ def instagram_callback(request):
     try:
         user, link = complete_instagram_oauth(code=code, token=state)
     except InstagramOAuthError as exc:
-        # --- Eski kod (komentga olindi): UniqueLink.objects.filter(token=state).update(status='failed')
         UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
         return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -172,9 +252,7 @@ def instagram_callback(request):
 def instagram_deauthorize(request):
     """
     Meta Deauthorize Callback URL.
-    Foydalanuvchi ilovadan ruxsatni olib tashlaganida Meta tomonidan POST so'rovi yuboriladi.
     """
-    # --- Eski kod (komentga olindi): signed_request = request.POST.get('signed_request') or request.data.get('signed_request')
     signed_request = request.data.get('signed_request')
     if not signed_request:
         return Response(
@@ -204,10 +282,7 @@ def instagram_deauthorize(request):
 def instagram_data_deletion(request):
     """
     Meta Data Deletion Request Callback URL.
-    Meta foydalanuvchi ma'lumotlarini o'chirish so'rovini yuboradi.
-    Meta formati bo'yicha javob qaytaramiz: {"url": "...", "confirmation_code": "..."}
     """
-    # --- Eski kod (komentga olindi): signed_request = request.POST.get('signed_request') or request.data.get('signed_request')
     signed_request = request.data.get('signed_request')
     if not signed_request:
         return Response(
@@ -240,8 +315,6 @@ def data_deletion_status(request, confirmation_code):
     """
     record = get_object_or_404(DataDeletionRequest, confirmation_code=confirmation_code)
 
-    # --- Eski qotirib yozilgan xabar (komentga olindi):
-    # message = "Instagram hisobingizga oid saqlangan ma'lumotlar to'liq o'chirildi."
     if record.status == 'completed':
         message = "Instagram hisobingizga oid saqlangan ma'lumotlar to'liq o'chirildi."
     elif record.status == 'failed':

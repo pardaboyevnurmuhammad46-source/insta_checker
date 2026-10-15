@@ -617,7 +617,6 @@ def handle_data_deletion_request(user_id: str) -> tuple[str, str]:
     """
     confirmation_code = uuid.uuid4().hex
     users = InstagramUser.objects.filter(ig_user_id=str(user_id))
-    # --- Eski tozalash kodi (komentga olindi):
     # for user in users:
     #     user.status = 'needs_reauth'
     #     user.access_token = None

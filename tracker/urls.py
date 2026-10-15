@@ -12,6 +12,7 @@ from .views import (
     instagram_data_deletion,
     data_deletion_status,
     link_info,
+    dashboard_stats,
 )
 
 router = DefaultRouter()
@@ -22,6 +23,7 @@ router.register(r'prizes', PrizeViewSet)
 router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
+    path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
     path('api/', include(router.urls)),
     path('link/', link_info, name='link_info'),
     path('link/<uuid:token>/', redirect_to_instagram, name='user_redirect'),
