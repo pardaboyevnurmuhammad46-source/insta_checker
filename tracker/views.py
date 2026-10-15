@@ -18,6 +18,8 @@ from .services import (
     build_instagram_auth_url,
     complete_instagram_oauth,
 )
+from .tasks import publish_reels_task
+
 
 
 class InstagramUserViewSet(viewsets.ModelViewSet):
@@ -113,10 +115,14 @@ def instagram_callback(request):
         UniqueLink.objects.filter(token=state).update(status='failed')
         return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Reels videoni Instagram'ga joylash vazifasini Celery orqali ishga tushirish
+    publish_reels_task.delay(link.id)
+
     return Response({
-        "message": "Instagram hisobi muvaffaqiyatli ulandi!",
+        "message": "Instagram hisobi muvaffaqiyatli ulandi va video Reels qilib joylanmoqda!",
         "user_name": user.name,
         "ig_user_id": user.ig_user_id,
         "user_status": user.status,
         "link_status": link.status,
     }, status=status.HTTP_200_OK)
+

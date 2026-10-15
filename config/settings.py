@@ -146,3 +146,14 @@ INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET', '')
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', 'http://127.0.0.1:8000/oauth/callback/')
 INSTAGRAM_SCOPE = os.getenv('INSTAGRAM_SCOPE', 'user_profile,user_media')
 
+# Celery & Redis Configuration
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
+SITE_URL = os.getenv('SITE_URL', 'http://127.0.0.1:8000')
+
+

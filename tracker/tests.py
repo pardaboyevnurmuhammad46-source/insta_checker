@@ -9,12 +9,15 @@ from django.utils import timezone
 from django.contrib.admin.sites import AdminSite
 
 from tracker.models import InstagramUser, UniqueLink, Post, Prize
-from tracker.admin import UniqueLinkAdmin
+from tracker.admin import UniqueLinkAdmin, PostAdmin
 from tracker.services import (
     InstagramOAuthError,
+    InstagramPublishError,
     build_instagram_auth_url,
     complete_instagram_oauth,
+    publish_reels_for_link,
 )
+from tracker.tasks import publish_reels_task
 
 
 class SettingsEnvTestCase(TestCase):
@@ -99,7 +102,6 @@ class InstagramOAuthTestCase(TestCase):
     @patch('tracker.services.requests.get')
     @patch('tracker.services.requests.post')
     def test_complete_instagram_oauth_success(self, mock_post, mock_get):
-        # Mock short-lived token response
         mock_post_resp = MagicMock()
         mock_post_resp.status_code = 200
         mock_post_resp.json.return_value = {
@@ -108,7 +110,6 @@ class InstagramOAuthTestCase(TestCase):
         }
         mock_post.return_value = mock_post_resp
 
-        # Mock long-lived token response
         mock_get_resp = MagicMock()
         mock_get_resp.status_code = 200
         mock_get_resp.json.return_value = {
@@ -132,8 +133,9 @@ class InstagramOAuthTestCase(TestCase):
         self.link.refresh_from_db()
         self.assertEqual(self.link.status, 'failed')
 
+    @patch('tracker.views.publish_reels_task.delay')
     @patch('tracker.views.complete_instagram_oauth')
-    def test_callback_endpoint_success(self, mock_complete):
+    def test_callback_endpoint_success(self, mock_complete, mock_task_delay):
         mock_user = self.user
         mock_user.status = 'connected'
         mock_user.ig_user_id = '178414999'
@@ -144,3 +146,79 @@ class InstagramOAuthTestCase(TestCase):
         data = response.json()
         self.assertEqual(data.get('user_status'), 'connected')
         self.assertEqual(data.get('ig_user_id'), '178414999')
+        mock_task_delay.assert_called_once_with(self.link.id)
+
+
+class ReelsPublishingTestCase(TestCase):
+    def setUp(self):
+        self.user = InstagramUser.objects.create(
+            name="Publisher User",
+            ig_user_id="1784140002",
+            access_token="valid_token_abc",
+            status="connected",
+        )
+        dummy_video = SimpleUploadedFile("sample_video.mp4", b"video_bytes", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.user, video=dummy_video)
+
+    def test_publish_reels_unconnected_user(self):
+        self.user.status = "pending"
+        self.user.save()
+
+        with self.assertRaises(InstagramPublishError):
+            publish_reels_for_link(self.link.id)
+
+    @patch('tracker.services.get_media_permalink')
+    @patch('tracker.services.publish_container')
+    @patch('tracker.services.wait_for_container_ready')
+    @patch('tracker.services.create_reels_container')
+    def test_publish_reels_success(self, mock_create, mock_wait, mock_publish, mock_permalink):
+        mock_create.return_value = "container_123"
+        mock_wait.return_value = True
+        mock_publish.return_value = "media_999"
+        mock_permalink.return_value = "https://instagram.com/reel/mock999/"
+
+        post = publish_reels_for_link(self.link.id, caption="Test Caption")
+
+        self.assertEqual(post.status, 'published')
+        self.assertEqual(post.ig_media_id, 'media_999')
+        self.assertEqual(post.permalink, "https://instagram.com/reel/mock999/")
+        self.assertIsNotNone(post.posted_at)
+        self.assertIsNotNone(post.next_check_at)
+
+        self.link.refresh_from_db()
+        self.assertEqual(self.link.status, 'posted')
+
+    @patch('tracker.services.create_reels_container')
+    def test_publish_reels_failure(self, mock_create):
+        mock_create.side_effect = InstagramPublishError("API xatolik yuz berdi")
+
+        with self.assertRaises(InstagramPublishError):
+            publish_reels_for_link(self.link.id)
+
+        post = Post.objects.get(link=self.link)
+        self.assertEqual(post.status, 'failed')
+        self.assertIn("API xatolik", post.error)
+
+        self.link.refresh_from_db()
+        self.assertEqual(self.link.status, 'failed')
+
+    @patch('tracker.tasks.publish_reels_for_link')
+    def test_publish_reels_task_success(self, mock_publish):
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.ig_media_id = "media_1"
+        mock_post.status = "published"
+        mock_publish.return_value = mock_post
+
+        result = publish_reels_task(self.link.id)
+        self.assertEqual(result.get('status'), 'published')
+        self.assertEqual(result.get('ig_media_id'), 'media_1')
+
+    @patch('tracker.admin.publish_reels_task.delay')
+    def test_admin_publish_reels_action(self, mock_delay):
+        admin_instance = UniqueLinkAdmin(UniqueLink, AdminSite())
+        mock_request = MagicMock()
+        queryset = UniqueLink.objects.filter(id=self.link.id)
+
+        admin_instance.publish_reels_action(mock_request, queryset)
+        mock_delay.assert_called_once_with(self.link.id)
