@@ -205,7 +205,9 @@ def redirect_to_instagram(request, token):
             'description': f'Aslida quyidagi manzilga o\'tilishi kerak edi: {auth_url}'
         })
 
-    return HttpResponseRedirect(auth_url)
+    return render(request, 'tracker/landing.html', {
+        'auth_url': auth_url
+    })
 
 
 @api_view(['GET'])
@@ -297,24 +299,17 @@ def user_portal(request, token):
 def user_portal_api(request, token):
     link = get_object_or_404(UniqueLink, token=token)
     post = getattr(link, 'post', None)
-    prizes_data = []
-    if post:
-        prizes_data = [{'milestone': p.milestone, 'sent_at': p.sent_at} for p in post.prizes.all()]
+    if not post:
+        return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
     return Response({
-        'user_name': link.user.name,
-        'token': str(link.token),
-        'status': link.status,
-        'video_url': link.video.url if link.video else None,
-        'post': {
-            'status': post.status,
-            'views': post.views,
-            'likes': post.likes,
-            'comments_count': post.comments_count,
-            'permalink': post.permalink,
-            'posted_at': post.posted_at,
-        } if post else None,
-        'prizes': prizes_data,
-    })
+        "status": post.status,
+        "permalink": post.permalink,
+        "views": post.views,
+        "likes": post.likes,
+        "comments_count": post.comments_count,
+        "posted_at": post.posted_at.isoformat() if post.posted_at else None,
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
@@ -394,7 +389,6 @@ def data_deletion_status(request, confirmation_code):
 
     return Response({
         "confirmation_code": record.confirmation_code,
-        "user_id": record.user_id,
         "status": record.status,
         "requested_at": record.requested_at,
         "message": message,

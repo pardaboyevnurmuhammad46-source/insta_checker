@@ -122,8 +122,8 @@ class InstagramOAuthTestCase(TestCase):
     @override_settings(INSTAGRAM_APP_ID='test_app_id', INSTAGRAM_APP_SECRET='test_secret')
     def test_redirect_to_instagram_success(self):
         response = self.client.get(f"/link/{self.link.token}/")
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("www.instagram.com/oauth/authorize", response.headers['Location'])
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "www.instagram.com/oauth/authorize")
 
         self.link.refresh_from_db()
         self.assertEqual(self.link.status, 'opened')
@@ -529,6 +529,7 @@ class MetaWebhooksTestCase(TestCase):
         status_data = status_resp.json()
         self.assertEqual(status_data["status"], "completed")
         self.assertEqual(status_data["confirmation_code"], conf_code)
+        self.assertNotIn("user_id", status_data)
 
 
 class CeleryBeatAndTasksTestCase(TestCase):
@@ -741,3 +742,108 @@ class NewApiRequirementsTestCase(TestCase):
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
         response2 = client.get("/api/users/")
         self.assertEqual(response2.status_code, 200)
+
+
+class UserPortalAndPublicEndpointsTestCase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = InstagramUser.objects.create(
+            name="Portal User",
+            ig_user_id="portal_ig_id",
+            access_token="secret_portal_token",
+            status="connected",
+        )
+        dummy = SimpleUploadedFile("promo.mp4", b"video_data", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.user, video=dummy, status='posted')
+        self.post = Post.objects.create(
+            link=self.link,
+            status='published',
+            permalink='https://www.instagram.com/reel/Cxyz123/',
+            views=120,
+            likes=8,
+            comments_count=1,
+            posted_at=timezone.now(),
+        )
+
+        dummy2 = SimpleUploadedFile("promo2.mp4", b"video_data", content_type="video/mp4")
+        self.link_no_post = UniqueLink.objects.create(user=self.user, video=dummy2, status='pending')
+
+    def test_user_portal_html_with_post_success(self):
+        resp = self.client.get(f"/my-post/{self.link.token}/")
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        self.assertIn("Salom, Portal User!", content)
+        self.assertIn("120", content)
+        self.assertIn("https://www.instagram.com/reel/Cxyz123/", content)
+        # Ensure private/sensitive credentials are NEVER exposed
+        self.assertNotIn("secret_portal_token", content)
+        self.assertNotIn("portal_ig_id", content)
+
+    def test_user_portal_html_without_post_loading_card(self):
+        resp = self.client.get(f"/my-post/{self.link_no_post.token}/")
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        self.assertIn("Instagram Reels'ga yuklaysizmi?", content)
+
+    def test_user_portal_html_invalid_token_404(self):
+        fake_uuid = "00000000-0000-0000-0000-000000000000"
+        resp = self.client.get(f"/my-post/{fake_uuid}/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_user_portal_html_method_not_allowed(self):
+        resp = self.client.post(f"/my-post/{self.link.token}/")
+        self.assertEqual(resp.status_code, 405)
+
+    def test_user_portal_api_with_post_success(self):
+        resp = self.client.get(f"/api/public/post/{self.link.token}/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "published")
+        self.assertEqual(data["permalink"], "https://www.instagram.com/reel/Cxyz123/")
+        self.assertEqual(data["views"], 120)
+        self.assertEqual(data["likes"], 8)
+        self.assertEqual(data["comments_count"], 1)
+        self.assertIn("posted_at", data)
+        # Faqat shu maydonlar, ortiqcha ma'lumot yo'qligini tekshirish
+        expected_keys = {"status", "permalink", "views", "likes", "comments_count", "posted_at"}
+        self.assertEqual(set(data.keys()), expected_keys)
+
+    def test_user_portal_api_without_post_pending(self):
+        resp = self.client.get(f"/api/public/post/{self.link_no_post.token}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"status": "pending"})
+
+    def test_user_portal_api_invalid_token_404(self):
+        fake_uuid = "00000000-0000-0000-0000-000000000000"
+        resp = self.client.get(f"/api/public/post/{fake_uuid}/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_user_portal_api_method_not_allowed(self):
+        resp = self.client.post(f"/api/public/post/{self.link.token}/")
+        self.assertEqual(resp.status_code, 405)
+
+    def test_data_deletion_status_messages(self):
+        req_pending = DataDeletionRequest.objects.create(
+            confirmation_code="code_pending",
+            user_id="user_1",
+            status="pending",
+        )
+        resp_p = self.client.get(f"/oauth/data-deletion/status/{req_pending.confirmation_code}/")
+        self.assertEqual(resp_p.status_code, 200)
+        self.assertIn("qabul qilindi", resp_p.json()["message"])
+        self.assertNotIn("user_id", resp_p.json())
+
+        req_failed = DataDeletionRequest.objects.create(
+            confirmation_code="code_failed",
+            user_id="user_2",
+            status="failed",
+        )
+        resp_f = self.client.get(f"/oauth/data-deletion/status/{req_failed.confirmation_code}/")
+        self.assertEqual(resp_f.status_code, 200)
+        self.assertIn("xatolik", resp_f.json()["message"])
+
+        resp_404 = self.client.get("/oauth/data-deletion/status/non_existing_code/")
+        self.assertEqual(resp_404.status_code, 404)
+
+        resp_405 = self.client.post(f"/oauth/data-deletion/status/{req_pending.confirmation_code}/")
+        self.assertEqual(resp_405.status_code, 405)

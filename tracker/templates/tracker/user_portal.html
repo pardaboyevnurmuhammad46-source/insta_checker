@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ link.user.name }} - Video va Statistika</title>
+    <title>{{ link.user.name }} - Post va Statistika</title>
     <style>
         :root {
             --primary: #6366f1;
-            --primary-hover: #4f46e5;
             --bg: #0f172a;
             --card-bg: #1e293b;
             --border: #334155;
@@ -17,11 +16,7 @@
             --warning: #f59e0b;
             --danger: #ef4444;
         }
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg);
@@ -52,15 +47,9 @@
             font-weight: 700;
             margin-bottom: 6px;
         }
-        .header p {
-            color: var(--text-sub);
-            font-size: 14px;
-        }
-        .content {
-            padding: 24px;
-        }
+        .header p { color: var(--text-sub); font-size: 14px; }
+        .content { padding: 24px; }
         .video-box {
-            position: relative;
             background: #000;
             border-radius: 12px;
             overflow: hidden;
@@ -70,11 +59,7 @@
             justify-content: center;
             align-items: center;
         }
-        video {
-            max-width: 100%;
-            max-height: 380px;
-            border-radius: 8px;
-        }
+        video { max-width: 100%; max-height: 380px; border-radius: 8px; }
         .status-badge {
             display: inline-block;
             padding: 6px 14px;
@@ -85,12 +70,10 @@
             letter-spacing: 0.5px;
             margin-bottom: 16px;
         }
-        .badge-pending { background: #3b82f6; color: white; }
-        .badge-opened { background: #8b5cf6; color: white; }
-        .badge-publishing { background: var(--warning); color: #000; }
-        .badge-published { background: var(--success); color: white; }
-        .badge-failed { background: var(--danger); color: white; }
-        .badge-deleted { background: #64748b; color: white; }
+        .badge-kutilmoqda { background: #3b82f6; color: white; }
+        .badge-joylanmoqda { background: var(--warning); color: #000; }
+        .badge-joylandi { background: var(--success); color: white; }
+        .badge-xato { background: var(--danger); color: white; }
 
         .action-card {
             background: rgba(99, 102, 241, 0.1);
@@ -100,11 +83,7 @@
             text-align: center;
             margin-bottom: 24px;
         }
-        .action-card h3 {
-            font-size: 18px;
-            margin-bottom: 8px;
-            color: #e0e7ff;
-        }
+        .action-card h3 { font-size: 18px; margin-bottom: 8px; color: #e0e7ff; }
         .action-card p {
             color: var(--text-sub);
             font-size: 14px;
@@ -125,10 +104,19 @@
             transition: transform 0.2s, opacity 0.2s;
             box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3);
         }
-        .btn-upload:hover {
-            transform: translateY(-2px);
-            opacity: 0.95;
+        .btn-upload:hover { transform: translateY(-2px); opacity: 0.95; }
+
+        .loading-card {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px dashed rgba(245, 158, 11, 0.4);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            margin-bottom: 24px;
         }
+        .loading-card h3 { color: #fde68a; font-size: 18px; margin-bottom: 8px; }
+        .loading-card p { color: var(--text-sub); font-size: 14px; }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -142,41 +130,14 @@
             border-radius: 12px;
             text-align: center;
         }
-        .stat-icon {
-            font-size: 20px;
-            margin-bottom: 6px;
-        }
-        .stat-val {
-            font-size: 22px;
-            font-weight: 700;
-            color: var(--text-main);
-        }
+        .stat-icon { font-size: 20px; margin-bottom: 6px; }
+        .stat-val { font-size: 22px; font-weight: 700; color: var(--text-main); }
         .stat-label {
             font-size: 11px;
             color: var(--text-sub);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-top: 4px;
-        }
-        .prize-card {
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 20px;
-        }
-        .prize-card h4 {
-            color: #a7f3d0;
-            margin-bottom: 8px;
-            font-size: 15px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .prize-card ul {
-            padding-left: 20px;
-            color: var(--text-sub);
-            font-size: 13px;
         }
         .post-link-btn {
             display: inline-block;
@@ -189,20 +150,37 @@
             font-weight: 600;
             margin-top: 10px;
         }
-        .footer-note {
-            text-align: center;
-            color: var(--text-sub);
-            font-size: 12px;
-            margin-top: 20px;
+        .prize-card {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
         }
+        .prize-card h4 { color: #a7f3d0; margin-bottom: 8px; font-size: 15px; }
+        .prize-card ul { padding-left: 20px; color: var(--text-sub); font-size: 13px; }
+        .footer-note { text-align: center; color: var(--text-sub); font-size: 12px; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <span class="status-badge badge-{{ link.status }}">{{ link.get_status_display }}</span>
+            {% if post %}
+                {% if post.status == 'published' %}
+                    <span class="status-badge badge-joylandi">Joylandi</span>
+                {% elif post.status == 'publishing' %}
+                    <span class="status-badge badge-joylanmoqda">Joylanmoqda</span>
+                {% elif post.status == 'queued' %}
+                    <span class="status-badge badge-kutilmoqda">Kutilmoqda</span>
+                {% else %}
+                    <span class="status-badge badge-xato">Xato</span>
+                {% endif %}
+            {% else %}
+                <span class="status-badge badge-kutilmoqda">Kutilmoqda</span>
+            {% endif %}
+
             <h1>Salom, {{ link.user.name }}!</h1>
-            <p>Siz uchun maxsus tayyorlangan promo video va uning statistikasi</p>
+            <p>Siz uchun tayyorlangan video va uning ko'rsatkichlari</p>
         </div>
 
         <div class="content">
@@ -216,12 +194,17 @@
             {% endif %}
 
             {% if link.status == 'pending' or link.status == 'opened' %}
-            <div class="action-card">
-                <h3>Instagram Reels'ga yuklaysizmi?</h3>
-                <p>Ushbu videoni Instagram akkauntingizga Reels formatida avtomatik joylashtiring va ko'rishlar soniga qarab sovrinlar oling!</p>
-                <a href="/link/{{ link.token }}/" class="btn-upload">🚀 Ha, Instagram'ga yuklash</a>
-            </div>
-            {% elif post %}
+                <div class="action-card">
+                    <h3>Instagram Reels'ga yuklaysizmi?</h3>
+                    <p>Ushbu videoni Instagram akkauntingizga Reels formatida joylashtiring va ko'rishlar soniga qarab sovrinlar oling!</p>
+                    <a href="/link/{{ link.token }}/" class="btn-upload">🚀 Ha, Instagram'ga yuklash</a>
+                </div>
+            {% elif not post or post.status != 'published' %}
+                <div class="loading-card">
+                    <h3>⏳ Videongiz joylanmoqda</h3>
+                    <p>Reels videoni Instagram'ga yuklash jarayoni ketmoqda. Sahifani bir necha daqiqadan so'ng yangilang.</p>
+                </div>
+            {% else %}
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-icon">👁️</div>
@@ -257,15 +240,11 @@
                         {% endfor %}
                     </ul>
                 </div>
-                {% else %}
-                <div style="background: rgba(255,255,255,0.02); border: 1px dashed var(--border); border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 20px; font-size: 13px; color: var(--text-sub);">
-                    🎁 500, 1000 yoki 5000 ko'rish to'planganda sovrinlar beriladi!
-                </div>
                 {% endif %}
             {% endif %}
 
             <div class="footer-note">
-                Ushbu sahifa real-time yangilanadi. Statistikalar har doim sizning profilingiz bo'yicha hisoblanadi.
+                Ushbu sahifa faqat sizning videongiz statistikasini ko'rsatadi.
             </div>
         </div>
     </div>
