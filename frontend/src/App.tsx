@@ -23,7 +23,7 @@ export const App: React.FC = () => {
   return (
     <ToastProvider>
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter basename="/panel">
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedLayout />}>

@@ -73,7 +73,7 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - media_volume:/app/media
       - static_volume:/app/static
-      - ./frontend/dist:/usr/share/nginx/html
+      - ./frontend/dist:/usr/share/nginx/html/panel
     depends_on:
       - web
 

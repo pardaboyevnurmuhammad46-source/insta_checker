@@ -277,20 +277,43 @@ def instagram_callback(request):
         'status_class': 'success',
         'title': 'Muvaffaqiyatli Ulandi!',
         'message': f'Salom {user.name}, hisobingiz ulandi.',
-        'portal_url': f'/my-post/{link.token}/',
+        'my_post_url': f'/my-post/{link.token}/',
     }, status=status.HTTP_200_OK)
+
+
+import re
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def home(request):
+    link_input = request.GET.get('link', '').strip()
+    error = None
+    if link_input:
+        match = re.search(r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})', link_input, re.IGNORECASE)
+        if match:
+            return HttpResponseRedirect(f'/link/{match.group(1)}/')
+        else:
+            error = "Havola noto'g'ri"
+    return render(request, 'tracker/home.html', {'error': error})
 
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def user_portal(request, token):
-    link = get_object_or_404(UniqueLink, token=token)
+    try:
+        link = UniqueLink.objects.get(token=token)
+    except UniqueLink.DoesNotExist:
+        return render(request, '404.html', status=status.HTTP_404_NOT_FOUND)
+
     post = getattr(link, 'post', None)
-    prizes = post.prizes.all().order_by('milestone') if post else []
-    return render(request, 'tracker/user_portal.html', {
-        'link': link,
-        'post': post,
-        'prizes': prizes,
+    return render(request, 'tracker/my_post.html', {
+        'user_name': link.user.name,
+        'link_status': link.status,
+        'post_status': post.status if post else None,
+        'permalink': post.permalink if post else None,
+        'views': post.views if post else 0,
+        'likes': post.likes if post else 0,
+        'comments_count': post.comments_count if post else 0,
     })
 
 

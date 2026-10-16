@@ -1,82 +1,29 @@
-<!DOCTYPE html>
-<html lang="uz">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InstaChecker</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f8fafc;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            padding: 20px;
-            box-sizing: border-box;
-            color: #334155;
-            text-align: center;
-        }
-        .container {
-            background-color: white;
-            padding: 40px 30px;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-            max-width: 400px;
-            width: 100%;
-        }
-        .icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-        }
-        .success .icon { color: #10b981; }
-        .error .icon { color: #ef4444; }
-        h1 {
-            font-size: 24px;
-            font-weight: 700;
-            margin: 0 0 10px 0;
-            color: #0f172a;
-        }
-        p {
-            font-size: 16px;
-            line-height: 1.5;
-            margin: 0 0 20px 0;
-            color: #64748b;
-        }
-        .btn {
-            display: inline-block;
-            background-color: #6366f1;
-            color: white;
-            text-decoration: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-weight: 600;
-            transition: background-color 0.2s;
-        }
-        .btn:hover {
-            background-color: #4f46e5;
-        }
-    </style>
-</head>
-<body>
-    <div class="container {{ status_class }}">
-        <div class="icon">
-            {% if is_success %}✅{% else %}❌{% endif %}
+{% extends 'tracker/base.html' %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block container_class %}{{ status_class }}{% endblock %}
+
+{% block extra_css %}
+    .success .icon { color: #10b981; }
+    .error .icon { color: #ef4444; }
+{% endblock %}
+
+{% block content %}
+<div class="icon">
+    {% if is_success %}✅{% else %}❌{% endif %}
+</div>
+<h1>{{ title }}</h1>
+<p>{{ message }}</p>
+{% if description %}
+    <p style="font-size: 14px; opacity: 0.8;">{{ description }}</p>
+{% endif %}
+{% if is_success %}
+    <p style="font-size: 14px; font-weight: bold;">Videongiz Instagram Reels sahifangizga joylanmoqda. Bu biroz vaqt olishi mumkin.</p>
+    {% if my_post_url %}
+        <div style="margin-top: 20px;">
+            <a href="{{ my_post_url }}" class="btn">Postimni ko'rish</a>
         </div>
-        <h1>{{ title }}</h1>
-        <p>{{ message }}</p>
-        {% if description %}
-            <p style="font-size: 14px; opacity: 0.8;">{{ description }}</p>
-        {% endif %}
-        {% if is_success %}
-            <p style="font-size: 14px; font-weight: bold;">Videongiz Instagram Reels sahifangizga joylanmoqda. Bu biroz vaqt olishi mumkin.</p>
-            {% if portal_url %}
-                <div style="margin-top: 20px;">
-                    <a href="{{ portal_url }}" class="btn">📊 Post statistikasini ko'rish</a>
-                </div>
-            {% endif %}
-        {% endif %}
-    </div>
-</body>
-</html>
+    {% endif %}
+{% endif %}
+{% endblock %}
