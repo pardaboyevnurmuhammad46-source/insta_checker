@@ -15,7 +15,6 @@ from .views import (
     dashboard_stats,
     user_portal,
     user_portal_api,
-    home,
 )
 
 router = DefaultRouter()
@@ -26,7 +25,6 @@ router.register(r'prizes', PrizeViewSet)
 router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
-    path('', home, name='home'),
     path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
     path('api/public/post/<uuid:token>/', user_portal_api, name='user_portal_api'),
     path('api/', include(router.urls)),

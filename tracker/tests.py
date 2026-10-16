@@ -768,23 +768,6 @@ class UserPortalAndPublicEndpointsTestCase(TestCase):
         dummy2 = SimpleUploadedFile("promo2.mp4", b"video_data", content_type="video/mp4")
         self.link_no_post = UniqueLink.objects.create(user=self.user, video=dummy2, status='pending')
 
-    def test_home_page_status_and_content(self):
-        resp = self.client.get("/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertNotIn("admin", resp.content.decode().lower())
-        self.assertNotIn("panel", resp.content.decode().lower())
-
-    def test_home_page_invalid_link(self):
-        resp = self.client.get("/?link=not-a-uuid")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("Havola noto&#x27;g&#x27;ri", resp.content.decode())
-
-    def test_home_page_valid_link_redirects(self):
-        valid_uuid = "123e4567-e89b-12d3-a456-426614174000"
-        resp = self.client.get(f"/?link=some_text_{valid_uuid}_more_text")
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.headers['Location'], f"/link/{valid_uuid}/")
-
     def test_user_portal_html_with_post_success(self):
         resp = self.client.get(f"/my-post/{self.link.token}/")
         self.assertEqual(resp.status_code, 200)
@@ -800,7 +783,7 @@ class UserPortalAndPublicEndpointsTestCase(TestCase):
         resp = self.client.get(f"/my-post/{self.link_no_post.token}/")
         self.assertEqual(resp.status_code, 200)
         content = resp.content.decode()
-        self.assertIn("joylanmoqda", content)
+        self.assertIn("Instagram Reels'ga yuklaysizmi?", content)
 
     def test_user_portal_html_invalid_token_404(self):
         fake_uuid = "00000000-0000-0000-0000-000000000000"

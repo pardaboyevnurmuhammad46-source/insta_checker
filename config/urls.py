@@ -23,6 +23,7 @@ from tracker.throttles import LoginView
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
+    path('', RedirectView.as_view(url='/admin/', permanent=False)),
     path('admin/', admin.site.urls),
     path('api/token/', LoginView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
