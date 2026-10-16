@@ -26,12 +26,12 @@ export interface Post {
   user_name: string;
   ig_media_id: string | null;
   permalink: string | null;
-  status: 'queued' | 'publishing' | 'published' | 'failed';
+  status: 'queued' | 'publishing' | 'published' | 'failed' | 'deleted';
   posted_at: string | null;
   views: number;
   likes: number;
   comments_count: number;
-  last_check: string | null;
+  last_checked_at: string | null;
   next_check_at: string | null;
   error: string | null;
 }

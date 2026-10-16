@@ -163,6 +163,8 @@ def link_info(request):
     })
 
 
+from django.shortcuts import render
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def redirect_to_instagram(request, token):
@@ -170,17 +172,21 @@ def redirect_to_instagram(request, token):
 
     # Muddati o'tganligini tekshirish
     if link.expires_at and timezone.now() > link.expires_at:
-        return Response(
-            {"error": "Ushbu unikal linkning amal qilish muddati tugagan."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Link muddati tugagan',
+            'message': 'Ushbu unikal linkning amal qilish muddati tugagan. Iltimos yangi link so\'rang.'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # Yakunlangan yoki xato linklarni tekshirish
     if link.status in ('posted', 'failed'):
-        return Response(
-            {"error": f"Ushbu link bilan amal bajarib bo'lmaydi (status: {link.status})."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Link faol emas',
+            'message': f"Ushbu link allaqachon ishlatilgan yoki bekor qilingan (holati: {link.status})."
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # Statusni ochilgan holatga o'tkazish
     if link.status == 'pending':
@@ -191,14 +197,17 @@ def redirect_to_instagram(request, token):
 
     # Agar INSTAGRAM_APP_ID belgilanmagan bo'lsa (dev/test), preview qaytaramiz
     if not settings.INSTAGRAM_APP_ID:
-        return Response({
-            "message": "INSTAGRAM_APP_ID sozlanmagan (.env faylida ko'rsating).",
-            "auth_url_preview": auth_url,
-            "token": str(link.token),
-            "status": link.status,
-        }, status=status.HTTP_200_OK)
+        return render(request, 'tracker/status.html', {
+            'is_success': True,
+            'status_class': 'success',
+            'title': 'Test Rejimi',
+            'message': 'INSTAGRAM_APP_ID sozlanmagan.',
+            'description': f'Aslida quyidagi manzilga o\'tilishi kerak edi: {auth_url}'
+        })
 
-    return HttpResponseRedirect(auth_url)
+    return render(request, 'tracker/landing.html', {
+        'auth_url': auth_url
+    })
 
 
 @api_view(['GET'])
@@ -209,43 +218,65 @@ def instagram_callback(request):
         state = request.GET.get('state')
         if state:
             UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
-        return Response({
-            "error": request.GET.get('error'),
-            "reason": request.GET.get('error_reason'),
-            "description": request.GET.get('error_description') or "Instagram orqali ruxsat berilmadi."
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Ruxsat rad etildi',
+            'message': 'Siz Instagram orqali ruxsat bermadingiz.',
+            'description': request.GET.get('error_description') or "Instagram xatolik qaytardi."
         }, status=status.HTTP_400_BAD_REQUEST)
 
     code = request.GET.get('code')
     state = request.GET.get('state')
 
     if not code or not state:
-        return Response(
-            {"error": "'code' va 'state' parametrlari talab qilinadi."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Xatolik',
+            'message': 'Kerakli parametrlar (code va state) topilmadi.'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # Callback link holati va muddatini tekshirish (qayta ishlatilgan yoki muddati o'tgan linklar uchun)
     link_obj = get_object_or_404(UniqueLink, token=state)
     if link_obj.status in ('posted', 'failed') or (hasattr(link_obj, 'post') and link_obj.post.status == 'published'):
-        return Response({"error": "Bu link allaqachon ishlatilgan."}, status=status.HTTP_400_BAD_REQUEST)
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Link ishlatilgan',
+            'message': 'Bu link orqali allaqachon amal bajarilgan.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+        
     if link_obj.expires_at and timezone.now() > link_obj.expires_at:
-        return Response({"error": "Link muddati tugagan."}, status=status.HTTP_400_BAD_REQUEST)
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Link muddati tugagan',
+            'message': 'Linkning amal qilish muddati tugagan.'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         user, link = complete_instagram_oauth(code=code, token=state)
     except InstagramOAuthError as exc:
+        import logging
+        logging.getLogger(__name__).error(f"InstagramOAuthError: {exc}")
         UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return render(request, 'tracker/status.html', {
+            'is_success': False,
+            'status_class': 'error',
+            'title': 'Avtorizatsiya xatosi',
+            'message': 'Instagram bilan ulanishda xatolik yuz berdi.',
+            'description': 'Iltimos, qaytadan urinib ko\'ring yoki administrator bilan bog\'laning.'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # Reels videoni Instagram'ga joylash vazifasini Celery orqali ishga tushirish
     publish_reels_task.delay(link.id)
 
-    return Response({
-        "message": "Instagram hisobi muvaffaqiyatli ulandi va video Reels qilib joylanmoqda!",
-        "user_name": user.name,
-        "ig_user_id": user.ig_user_id,
-        "user_status": user.status,
-        "link_status": link.status,
+    return render(request, 'tracker/status.html', {
+        'is_success': True,
+        'status_class': 'success',
+        'title': 'Muvaffaqiyatli Ulandi!',
+        'message': f'Salom {user.name}, hisobingiz ulandi.',
     }, status=status.HTTP_200_OK)
 
 

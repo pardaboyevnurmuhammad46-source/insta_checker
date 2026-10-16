@@ -80,24 +80,34 @@ def check_post_metrics_task(self, post_id: int):
 def check_all_due_posts_task():
     """
     next_check_at vaqti kelgan barcha faol (published) postlar uchun fonda tekshiruv vazifalarini ishga tushiradi.
-    Worker orqada qolsa ham postlar qayta-qayta navbatga tushmasligi uchun darhol 10 daqiqaga 'band' qilinadi.
+    Katta hajmdagi ma'lumotlar bazasi (1,000,000+ posts) uchun tsikl orqali ko'proq postlarni qamrab oladi.
     """
     now = timezone.now()
-    with transaction.atomic():
-        ids = list(
-            Post.objects.select_for_update(skip_locked=True)
-            .filter(status='published', next_check_at__lte=now)
-            .order_by('next_check_at')
-            .values_list('id', flat=True)[:500]
-        )
-        if ids:
-            Post.objects.filter(id__in=ids).update(next_check_at=now + timedelta(minutes=10))
+    total_dispatched = 0
+    max_to_dispatch_per_run = 50000  # Har ishga tushganda maksimal 50,000 ta postni tekshiruvga yuborish
+    batch_size = 1000
+    
+    while total_dispatched < max_to_dispatch_per_run:
+        with transaction.atomic():
+            ids = list(
+                Post.objects.select_for_update(skip_locked=True)
+                .filter(status='published', next_check_at__lte=now)
+                .order_by('next_check_at')
+                .values_list('id', flat=True)[:batch_size]
+            )
+            if not ids:
+                break
+                
+            # Keyingi tekshiruvni vaqtinchalik 2 soatga kechiktiramiz, to worker uni haqiqatda qayta ishlamaguncha
+            Post.objects.filter(id__in=ids).update(next_check_at=now + timedelta(hours=2))
 
-    logger.info("Vaqti yetgan postlar tekshiruvi: %d ta post topildi va navbatga qo'yildi", len(ids))
-    for post_id in ids:
-        check_post_metrics_task.delay(post_id)
+        for post_id in ids:
+            check_post_metrics_task.delay(post_id)
+            
+        total_dispatched += len(ids)
 
-    return len(ids)
+    logger.info("Vaqti yetgan postlar tekshiruvi: %d ta post topildi va navbatga qo'yildi", total_dispatched)
+    return total_dispatched
 
 
 @shared_task

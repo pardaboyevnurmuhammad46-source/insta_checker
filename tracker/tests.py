@@ -134,7 +134,7 @@ class InstagramOAuthTestCase(TestCase):
 
         response = self.client.get(f"/link/{self.link.token}/")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("muddati tugagan", response.json().get('error', ''))
+        self.assertIn("muddati tugagan", response.content.decode())
 
     def test_redirect_invalid_status(self):
         self.link.status = 'posted'
@@ -142,7 +142,7 @@ class InstagramOAuthTestCase(TestCase):
 
         response = self.client.get(f"/link/{self.link.token}/")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("amal bajarib bo'lmaydi", response.json().get('error', ''))
+        self.assertIn("allaqachon ishlatilgan", response.content.decode())
 
     @patch('tracker.services.requests.get')
     @patch('tracker.services.requests.post')
@@ -188,9 +188,7 @@ class InstagramOAuthTestCase(TestCase):
 
         response = self.client.get(f"/oauth/callback/?code=test_code&state={self.link.token}")
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data.get('user_status'), 'connected')
-        self.assertEqual(data.get('ig_user_id'), '178414999')
+        self.assertIn("Muvaffaqiyatli Ulandi!", response.content.decode())
         mock_task_delay.assert_called_once_with(self.link.id)
 
 

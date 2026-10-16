@@ -138,11 +138,6 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # CSRF Trusted Origins
 raw_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000,http://localhost,http://127.0.0.1')
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf.split(',') if origin.strip()]
-CSRF_TRUSTED_ORIGINS.extend([
-    'https://*.ngrok-free.app',
-    'https://*.ngrok.io',
-    'https://*.ngrok.app',
-])
 site_url = os.getenv('SITE_URL')
 if site_url and site_url not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(site_url)
