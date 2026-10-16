@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Bilan Ulanish</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            color: #334155;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            padding: 40px 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            max-width: 450px;
+            width: 100%;
+        }
+        .icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 10px 0;
+            color: #0f172a;
+        }
+        p {
+            font-size: 16px;
+            line-height: 1.6;
+            margin: 0 0 20px 0;
+            color: #64748b;
+        }
+        .info-box {
+            background-color: #f1f5f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            text-align: left;
+            font-size: 14px;
+        }
+        .info-box ul {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+        }
+        .info-box li {
+            margin-bottom: 5px;
+        }
+        .btn {
+            display: inline-block;
+            background-color: #6366f1;
+            color: white;
+            text-decoration: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: background-color 0.2s;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+        }
+        .btn:hover {
+            background-color: #4f46e5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">📸</div>
+        <h1>Ulanishga ruxsat bering</h1>
+        <p>Hurmatli foydalanuvchi, davom etish uchun Instagram hisobingiz orqali ulanishingiz kerak bo'ladi.</p>
+        
+        <div class="info-box">
+            <strong>Nima sodir bo'ladi?</strong>
+            <ul>
+                <li>Sizning Instagram sahifangizga maxsus promo video joylanadi.</li>
+                <li>Videoni ko'rishlar soni kuzatib boriladi.</li>
+                <li>Belgilangan prosmotr soniga yetganda sizga yutuqlar taqdim etiladi.</li>
+            </ul>
+        </div>
+
+        <a href="{{ auth_url }}" class="btn">Instagram orqali davom etish</a>
+    </div>
+</body>
+</html>

@@ -375,10 +375,11 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
 def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     """
     Post yoshiga qarab keyingi tekshirish vaqtini adaptiv hisoblaydi:
-    - 0 .. 24 soat: har 1 soatda
-    - 1 .. 3 kun: har 3 soatda
-    - 3 .. 7 kun: har 12 soatda
-    - 7 kundan so'ng: kuniga 1 marta (24 soat)
+    - 0 .. 24 soat: har 15 daqiqada
+    - 1 .. 3 kun: har 1 soatda
+    - 3 .. 7 kun: har 4 soatda
+    - 7 .. 14 kun: har 12 soatda
+    - 14 kundan so'ng: kuniga 1 marta (24 soat)
     """
     if post.status != 'published' or not post.posted_at:
         return None
@@ -388,13 +389,15 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
 
     age = now - post.posted_at
     if age < timedelta(0):
-        return now + timedelta(hours=1)
+        return now + timedelta(minutes=15)
 
     if age < timedelta(hours=24):
-        return now + timedelta(hours=1)
+        return now + timedelta(minutes=15)
     elif age < timedelta(days=3):
-        return now + timedelta(hours=3)
+        return now + timedelta(hours=1)
     elif age < timedelta(days=7):
+        return now + timedelta(hours=4)
+    elif age < timedelta(days=14):
         return now + timedelta(hours=12)
     else:
         return now + timedelta(days=1)

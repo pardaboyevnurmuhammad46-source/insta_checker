@@ -40,7 +40,7 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 class InstagramUserViewSet(viewsets.ModelViewSet):
-    queryset = InstagramUser.objects.all()
+    queryset = InstagramUser.objects.all().order_by("-id")
     serializer_class = InstagramUserSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -205,9 +205,7 @@ def redirect_to_instagram(request, token):
             'description': f'Aslida quyidagi manzilga o\'tilishi kerak edi: {auth_url}'
         })
 
-    return render(request, 'tracker/landing.html', {
-        'auth_url': auth_url
-    })
+    return HttpResponseRedirect(auth_url)
 
 
 @api_view(['GET'])
@@ -277,7 +275,46 @@ def instagram_callback(request):
         'status_class': 'success',
         'title': 'Muvaffaqiyatli Ulandi!',
         'message': f'Salom {user.name}, hisobingiz ulandi.',
+        'portal_url': f'/my-post/{link.token}/',
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def user_portal(request, token):
+    link = get_object_or_404(UniqueLink, token=token)
+    post = getattr(link, 'post', None)
+    prizes = post.prizes.all().order_by('milestone') if post else []
+    return render(request, 'tracker/user_portal.html', {
+        'link': link,
+        'post': post,
+        'prizes': prizes,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def user_portal_api(request, token):
+    link = get_object_or_404(UniqueLink, token=token)
+    post = getattr(link, 'post', None)
+    prizes_data = []
+    if post:
+        prizes_data = [{'milestone': p.milestone, 'sent_at': p.sent_at} for p in post.prizes.all()]
+    return Response({
+        'user_name': link.user.name,
+        'token': str(link.token),
+        'status': link.status,
+        'video_url': link.video.url if link.video else None,
+        'post': {
+            'status': post.status,
+            'views': post.views,
+            'likes': post.likes,
+            'comments_count': post.comments_count,
+            'permalink': post.permalink,
+            'posted_at': post.posted_at,
+        } if post else None,
+        'prizes': prizes_data,
+    })
 
 
 @api_view(['POST'])

@@ -56,8 +56,6 @@ services:
   beat:
     build: .
     command: celery -A config beat -l info
-    volumes:
-      # - .:/app
     env_file: .env
     environment:
       - DB_HOST=db
