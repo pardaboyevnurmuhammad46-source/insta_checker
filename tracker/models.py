@@ -1,6 +1,15 @@
+import os
 import uuid
 from django.conf import settings
 from django.db import models
+
+
+def video_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    if not ext:
+        ext = '.mp4'
+    random_filename = f"{uuid.uuid4().hex}{ext}"
+    return os.path.join('videos', random_filename)
 
 
 class InstagramUser(models.Model):
@@ -38,7 +47,8 @@ class InstagramUser(models.Model):
 
 class Video(models.Model):
     title = models.CharField(max_length=255)
-    file = models.FileField(upload_to='videos/')
+    # file = models.FileField(upload_to='videos/')
+    file = models.FileField(upload_to=video_upload_path)
     is_default = models.BooleanField(default=False)
     owner = models.ForeignKey(
         InstagramUser,

@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     InstagramUserViewSet,
+    VideoViewSet,
     UniqueLinkViewSet,
     PostViewSet,
     PrizeViewSet,
@@ -25,6 +26,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r'users', InstagramUserViewSet)
+router.register(r'videos', VideoViewSet)
 router.register(r'links', UniqueLinkViewSet)
 router.register(r'posts', PostViewSet)
 router.register(r'prizes', PrizeViewSet)

@@ -1090,3 +1090,146 @@ class Phase2AuthPermissionsTestCase(TestCase):
         resp_reset_login = client_auth.post("/api/token/", {"username": "client_99", "password": "admin_reset_789"})
         self.assertEqual(resp_reset_login.status_code, 200)
 
+
+class Phase3VideoManagementTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = APIClient()
+
+        # Admin
+        self.admin = User.objects.create_superuser(username="video_admin", password="password")
+        self.ig_admin = InstagramUser.objects.create(name="Video Admin", user=self.admin)
+
+        # Users
+        self.user_a = User.objects.create_user(username="user_va", password="password")
+        self.ig_user_a = InstagramUser.objects.create(name="User VA", user=self.user_a)
+
+        self.user_b = User.objects.create_user(username="user_vb", password="password")
+        self.ig_user_b = InstagramUser.objects.create(name="User VB", user=self.user_b)
+
+    def test_invalid_video_extension_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+        f_bad = SimpleUploadedFile("bad.avi", b"fake_avi", content_type="video/x-msvideo")
+        resp = self.client.post("/api/videos/", {"title": "Bad Video", "file": f_bad}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(".mp4", str(resp.json()))
+
+    def test_empty_video_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+        f_empty = SimpleUploadedFile("empty.mp4", b"", content_type="video/mp4")
+        resp = self.client.post("/api/videos/", {"title": "Empty Video", "file": f_empty}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        self.assertTrue(any(word in str(resp.json()).lower() for word in ["empty", "bo'sh"]))
+
+    @override_settings(MAX_VIDEO_SIZE_BYTES=100, MAX_VIDEO_SIZE_MB=1)
+    def test_video_size_limit_rejected(self):
+        self.client.force_authenticate(user=self.admin)
+        f_large = SimpleUploadedFile("large.mp4", b"x" * 200, content_type="video/mp4")
+        resp = self.client.post("/api/videos/", {"title": "Large Video", "file": f_large}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("oshmasligi", str(resp.json()))
+
+    def test_uuid_filename_assigned_on_upload(self):
+        self.client.force_authenticate(user=self.admin)
+        f_valid = SimpleUploadedFile("../../traversal_name.MP4", b"valid_video_data", content_type="video/mp4")
+        resp = self.client.post("/api/videos/", {"title": "Safe Video", "file": f_valid}, format="multipart")
+        self.assertEqual(resp.status_code, 201)
+        video_id = resp.json()['id']
+        video = Video.objects.get(pk=video_id)
+        # Fayl nomi videos/<uuid>.mp4 formatida bo'lishi va path traversal yo'qligini tekshirish
+        self.assertTrue(video.file.name.startswith("videos/"))
+        self.assertTrue(video.file.name.endswith(".mp4"))
+        self.assertNotIn("traversal", video.file.name)
+        self.assertNotIn("..", video.file.name)
+
+    def test_single_is_default_video_transaction(self):
+        self.client.force_authenticate(user=self.admin)
+        f1 = SimpleUploadedFile("v1.mp4", b"data1", content_type="video/mp4")
+        v1 = Video.objects.create(title="Promo 1", file=f1, is_default=True)
+
+        f2 = SimpleUploadedFile("v2.mp4", b"data2", content_type="video/mp4")
+        v2 = Video.objects.create(title="Promo 2", file=f2, is_default=False)
+
+        # v2 ni set-default orqali default qilish
+        resp = self.client.post(f"/api/videos/{v2.id}/set-default/")
+        self.assertEqual(resp.status_code, 200)
+
+        v1.refresh_from_db()
+        v2.refresh_from_db()
+        self.assertFalse(v1.is_default)
+        self.assertTrue(v2.is_default)
+        # Faqat bittasi default ekanligini tasdiqlash
+        self.assertEqual(Video.objects.filter(is_default=True).count(), 1)
+
+    def test_regular_user_cannot_upload_or_modify_or_delete_videos(self):
+        self.client.force_authenticate(user=self.user_a)
+        f = SimpleUploadedFile("user_video.mp4", b"user_data", content_type="video/mp4")
+
+        # POST rad etiladi
+        self.assertEqual(self.client.post("/api/videos/", {"title": "UV", "file": f}, format="multipart").status_code, 403)
+
+        f_admin = SimpleUploadedFile("admin_v.mp4", b"data", content_type="video/mp4")
+        v = Video.objects.create(title="Admin Video", file=f_admin)
+
+        # DELETE rad etiladi
+        self.assertEqual(self.client.delete(f"/api/videos/{v.id}/").status_code, 403)
+
+        # set-default rad etiladi
+        self.assertEqual(self.client.post(f"/api/videos/{v.id}/set-default/").status_code, 403)
+
+    def test_regular_user_only_sees_own_or_default_video(self):
+        # Default video
+        f_def = SimpleUploadedFile("default_promo.mp4", b"def", content_type="video/mp4")
+        v_def = Video.objects.create(title="Default Promo", file=f_def, is_default=True)
+
+        # User A ning shaxsiy videosi
+        f_a = SimpleUploadedFile("va.mp4", b"va", content_type="video/mp4")
+        v_a = Video.objects.create(title="User A Video", file=f_a, owner=self.ig_user_a, is_active=True)
+
+        # User B ning shaxsiy videosi
+        f_b = SimpleUploadedFile("vb.mp4", b"vb", content_type="video/mp4")
+        v_b = Video.objects.create(title="User B Video", file=f_b, owner=self.ig_user_b, is_active=True)
+
+        self.client.force_authenticate(user=self.user_a)
+
+        # User A ro'yxatni so'raydi
+        resp = self.client.get("/api/videos/")
+        self.assertEqual(resp.status_code, 200)
+        video_ids = [v['id'] for v in resp.json()['results']]
+        self.assertIn(v_a.id, video_ids)
+        self.assertIn(v_def.id, video_ids)
+        self.assertNotIn(v_b.id, video_ids)
+
+        # User A User B ning videosini ID bilan so'rasa 404 oladi
+        self.assertEqual(self.client.get(f"/api/videos/{v_b.id}/").status_code, 404)
+
+    @patch('tracker.services.create_reels_container')
+    @patch('tracker.services.wait_for_container_ready')
+    @patch('tracker.services.publish_container')
+    @patch('tracker.services.get_media_permalink')
+    def test_publish_reels_uses_video_selection_rule(self, mock_permalink, mock_publish, mock_wait, mock_container):
+        mock_container.return_value = "cont_123"
+        mock_publish.return_value = "media_123"
+        mock_permalink.return_value = "https://instagram.com/reel/123"
+
+        # Shaxsiy video yaratamiz
+        f_pers = SimpleUploadedFile("pers.mp4", b"pers_video", content_type="video/mp4")
+        pers_video = Video.objects.create(title="Personal Choice", file=f_pers, owner=self.ig_user_a, is_active=True)
+
+        self.ig_user_a.access_token = "valid_token"
+        self.ig_user_a.ig_user_id = "17841"
+        self.ig_user_a.status = 'connected'
+        self.ig_user_a.save()
+
+        # UniqueLink da video ko'rsatilmagan
+        link = UniqueLink.objects.create(user=self.ig_user_a, video=None)
+
+        post = publish_reels_for_link(link.id)
+        self.assertEqual(post.status, 'published')
+        link.refresh_from_db()
+        self.assertEqual(link.video.id, pers_video.id)
+        mock_container.assert_called_once()
+        call_kwargs = mock_container.call_args[1]
+        self.assertIn(pers_video.file.name, call_kwargs['video_url'])
+

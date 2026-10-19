@@ -234,5 +234,10 @@ SITE_URL = os.getenv('SITE_URL', 'http://127.0.0.1:8000')
 raw_milestones = os.getenv('PRIZE_MILESTONES', '500,1000,5000,10000,50000,100000')
 PRIZE_MILESTONES = [int(m.strip()) for m in raw_milestones.split(',') if m.strip().isdigit()]
 
+# Video hajmi limiti (standart: 100 MB)
+MAX_VIDEO_SIZE_MB = int(os.getenv('MAX_VIDEO_SIZE_MB', '100'))
+MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
+
+
 
 

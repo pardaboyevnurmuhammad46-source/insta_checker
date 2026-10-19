@@ -10,7 +10,8 @@ from datetime import timedelta
 import requests
 from django.conf import settings
 from django.utils import timezone
-from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+# from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -314,8 +315,15 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     if user.status != 'connected' or not user.access_token or not user.ig_user_id:
         raise InstagramPublishError("Foydalanuvchi Instagram akkauntini ulamagan yoki token yo'q.")
 
-    if not link.video:
+    # if not link.video:
+    #     raise InstagramPublishError("Joylash uchun video fayl mavjud emas.")
+    chosen_video = get_video_for_user(user) or link.video
+    if not chosen_video:
         raise InstagramPublishError("Joylash uchun video fayl mavjud emas.")
+
+    if link.video != chosen_video:
+        link.video = chosen_video
+        link.save(update_fields=['video'])
 
     post, _ = Post.objects.get_or_create(link=link)
     # Idempotentlik: agar post allaqachon published bo'lsa (masalan Celery retry paytida), qayta joylamaymiz
@@ -326,7 +334,8 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     post.status = 'publishing'
     post.save(update_fields=['status'])
 
-    video_url = link.video.url
+    # video_url = link.video.url
+    video_url = chosen_video.url
     if not video_url.startswith(('http://', 'https://')):
         base = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
         video_url = f"{base}{video_url}"

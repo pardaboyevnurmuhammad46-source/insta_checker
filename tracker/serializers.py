@@ -19,6 +19,37 @@ class InstagramUserSerializer(serializers.ModelSerializer):
         return bool(obj.access_token)
 
 
+class VideoSerializer(serializers.ModelSerializer):
+    owner_name = serializers.CharField(source='owner.name', read_only=True)
+    video_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Video
+        fields = ['id', 'title', 'file', 'video_url', 'is_default', 'owner', 'owner_name', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at', 'video_url']
+
+    def get_video_url(self, obj):
+        return obj.url
+
+    def validate_file(self, value):
+        if not value:
+            raise serializers.ValidationError("Fayl bo'sh bo'lishi mumkin emas.")
+
+        file_name = getattr(value, 'name', '')
+        if not file_name.lower().endswith('.mp4'):
+            raise serializers.ValidationError("Faqat .mp4 formatidagi videolar qabul qilinadi.")
+
+        if value.size == 0:
+            raise serializers.ValidationError("Video fayl bo'sh bo'lishi mumkin emas.")
+
+        max_bytes = getattr(settings, 'MAX_VIDEO_SIZE_BYTES', 100 * 1024 * 1024)
+        max_mb = getattr(settings, 'MAX_VIDEO_SIZE_MB', 100)
+        if value.size > max_bytes:
+            raise serializers.ValidationError(f"Video hajmi {max_mb}MB dan oshmasligi kerak.")
+
+        return value
+
+
 class UniqueLinkSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.name', read_only=True)
     full_link = serializers.SerializerMethodField()

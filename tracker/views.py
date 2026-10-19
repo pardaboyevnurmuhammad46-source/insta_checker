@@ -13,8 +13,11 @@ from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from django.db import transaction
+from django.db.models import Q
 
-from .permissions import IsAdminRole, IsOwnerOrAdmin
+# from .permissions import IsAdminRole, IsOwnerOrAdmin
+from .permissions import IsAdminRole, IsOwnerOrAdmin, IsAdminOrReadOnlyOwnerVideo
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 from .models import (
     InstagramUser,
@@ -28,6 +31,7 @@ from .models import (
 )
 from .serializers import (
     InstagramUserSerializer,
+    VideoSerializer,
     UniqueLinkSerializer,
     PostSerializer,
     PrizeSerializer,
@@ -103,6 +107,59 @@ class InstagramUserViewSet(viewsets.ModelViewSet):
         ig_user.user.set_password(new_password)
         ig_user.user.save()
         return Response({"message": f"Foydalanuvchi ({ig_user.user.username}) paroli muvaffaqiyatli tiklandi."})
+
+
+class VideoViewSet(viewsets.ModelViewSet):
+    queryset = Video.objects.all().order_by('-created_at')
+    serializer_class = VideoSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [IsAdminOrReadOnlyOwnerVideo]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_default', 'is_active', 'owner']
+    search_fields = ['title', 'owner__name']
+    ordering_fields = ['created_at', 'title', 'id']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Video.objects.none()
+        if user.is_staff or user.is_superuser:
+            return Video.objects.select_related('owner').all().order_by('-created_at')
+        return Video.objects.select_related('owner').filter(
+            Q(owner__user=user, is_active=True) |
+            Q(is_default=True, is_active=True)
+        ).distinct().order_by('-created_at')
+
+    @action(detail=True, methods=['post'], url_path='set-default', permission_classes=[IsAdminRole])
+    def set_default(self, request, pk=None):
+        video = self.get_object()
+        with transaction.atomic():
+            Video.objects.filter(is_default=True).exclude(pk=video.pk).update(is_default=False)
+            video.is_default = True
+            video.is_active = True
+            video.save(update_fields=['is_default', 'is_active'])
+        return Response({
+            "message": f"'{video.title}' umumiy video (default) sifatida belgilandi.",
+            "video_id": video.id,
+            "is_default": video.is_default,
+        })
+
+    @action(detail=True, methods=['post'], url_path='assign-owner', permission_classes=[IsAdminRole])
+    def assign_owner(self, request, pk=None):
+        video = self.get_object()
+        owner_id = request.data.get('owner_id')
+        if not owner_id:
+            video.owner = None
+            video.save(update_fields=['owner'])
+            return Response({"message": "Video umumiy qilindi (owner olib tashlandi)."})
+        try:
+            ig_user = InstagramUser.objects.get(pk=owner_id)
+        except InstagramUser.DoesNotExist:
+            return Response({"error": "Bunday Instagram foydalanuvchisi topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+        video.owner = ig_user
+        video.save(update_fields=['owner'])
+        return Response({"message": f"Video '{ig_user.name}' ga biriktirildi.", "owner_id": ig_user.id})
 
 
 class UniqueLinkViewSet(viewsets.ModelViewSet):
