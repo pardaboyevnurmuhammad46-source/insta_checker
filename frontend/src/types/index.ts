@@ -15,6 +15,7 @@ export interface UniqueLink {
   token: string;
   full_link: string;
   video: string;
+  video_url?: string;
   status: 'pending' | 'opened' | 'posted' | 'failed';
   expires_at: string | null;
   created_at: string;
@@ -28,12 +29,22 @@ export interface Post {
   permalink: string | null;
   status: 'queued' | 'publishing' | 'published' | 'failed' | 'deleted';
   posted_at: string | null;
+  deleted_detected_at?: string | null;
   views: number;
   likes: number;
   comments_count: number;
   last_checked_at: string | null;
   next_check_at: string | null;
   error: string | null;
+  retry_count?: number;
+}
+
+export interface PostStat {
+  id: number;
+  checked_at: string;
+  views: number;
+  likes: number;
+  comments_count: number;
 }
 
 export interface Prize {
@@ -42,6 +53,16 @@ export interface Prize {
   user_name: string;
   milestone: number;
   sent_at: string;
+}
+
+export interface Notification {
+  id: number;
+  user: number;
+  kind: 'prize' | 'system';
+  message: string;
+  is_read: boolean;
+  created_at: string;
+  related_prize: number | null;
 }
 
 export interface DataDeletionRequest {
@@ -71,4 +92,87 @@ export interface PaginatedResponse<T> {
   next: string | null;
   previous: string | null;
   results: T[];
+}
+
+export interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  role: 'admin' | 'user';
+  is_staff: boolean;
+  instagram_user?: InstagramUser | null;
+}
+
+export interface UserSummary {
+  total_views: number;
+  total_likes: number;
+  total_comments: number;
+  posts_count: number;
+  prizes_count: number;
+  last_checked_at: string | null;
+}
+
+export interface AdminSummary {
+  total_users: number;
+  connected_users: number;
+  needs_reauth_users: number;
+  posts_by_status: Record<string, number>;
+  total_metrics: {
+    total_views: number;
+    total_likes: number;
+    total_comments: number;
+  };
+  total_views: number;
+  total_likes: number;
+  total_comments: number;
+  total_prizes: number;
+  expiring_tokens_count: number;
+}
+
+export interface AdminUserItem {
+  id: number;
+  username: string;
+  name: string;
+  ig_user_id: string | null;
+  status: 'pending' | 'connected' | 'needs_reauth';
+  posts_count: number;
+  total_views: number;
+  total_likes: number;
+  total_comments: number;
+  last_posted_at: string | null;
+  created_at: string;
+  has_token: boolean;
+}
+
+export interface AdminDailyStat {
+  date: string;
+  new_posts: number;
+  total_views: number;
+  total_likes: number;
+}
+
+export interface VideoItem {
+  id: number;
+  title: string;
+  file: string;
+  video_url: string;
+  is_default: boolean;
+  owner: number | null;
+  owner_name: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface PublishStatus {
+  has_post: boolean;
+  post_id?: number;
+  status: 'queued' | 'publishing' | 'published' | 'failed' | 'none';
+  posted_at?: string | null;
+  views?: number;
+  likes?: number;
+  comments_count?: number;
+  permalink?: string | null;
+  error?: string | null;
+  retry_count?: number;
+  can_retry?: boolean;
 }
