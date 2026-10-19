@@ -1,10 +1,15 @@
 import logging
+import csv
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.http import HttpResponseRedirect
+from django.core.cache import cache
+# from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
-from django.db.models import Count, Sum
+# from django.db.models import Count, Sum
+from django.db.models import Count, Sum, Max, Min
+from django.db.models.functions import Coalesce, TruncDate
 from datetime import timedelta
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, action, permission_classes
@@ -317,18 +322,35 @@ class DataDeletionRequestViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-requested_at']
 
 
+class Echo:
+    def write(self, value):
+        return value
+
+
 @api_view(['GET'])
 # @permission_classes([IsAdminUser])
 @permission_classes([IsAdminRole])
-def dashboard_stats(request):
-    users_by_status = InstagramUser.objects.values('status').annotate(count=Count('id'))
-    links_by_status = UniqueLink.objects.values('status').annotate(count=Count('id'))
+def admin_summary(request):
+    """
+    Admin uchun umumiy statistika (Redis keshda 60 soniya saqlanadi).
+    """
+    cached_data = cache.get('admin_summary_cache')
+    if cached_data is not None:
+        return Response(cached_data)
+
+    total_users = InstagramUser.objects.count()
+    connected_users = InstagramUser.objects.filter(status='connected').count()
+    needs_reauth_users = InstagramUser.objects.filter(status='needs_reauth').count()
+
     posts_by_status = Post.objects.values('status').annotate(count=Count('id'))
+    status_counts = {'published': 0, 'deleted': 0, 'failed': 0, 'queued': 0, 'publishing': 0}
+    for item in posts_by_status:
+        status_counts[item['status']] = item['count']
 
     total_metrics = Post.objects.aggregate(
-        total_views=Sum('views'),
-        total_likes=Sum('likes'),
-        total_comments=Sum('comments_count')
+        total_views=Coalesce(Sum('views'), 0),
+        total_likes=Coalesce(Sum('likes'), 0),
+        total_comments=Coalesce(Sum('comments_count'), 0),
     )
 
     total_prizes = Prize.objects.count()
@@ -340,14 +362,412 @@ def dashboard_stats(request):
         status='connected'
     ).count()
 
-    return Response({
-        "users_by_status": {item['status']: item['count'] for item in users_by_status},
-        "links_by_status": {item['status']: item['count'] for item in links_by_status},
-        "posts_by_status": {item['status']: item['count'] for item in posts_by_status},
+    users_by_status = InstagramUser.objects.values('status').annotate(count=Count('id'))
+    links_by_status = UniqueLink.objects.values('status').annotate(count=Count('id'))
+
+    data = {
+        "total_users": total_users,
+        "connected_users": connected_users,
+        "needs_reauth_users": needs_reauth_users,
+        "posts_by_status": status_counts,
         "total_metrics": total_metrics,
+        "total_views": total_metrics['total_views'],
+        "total_likes": total_metrics['total_likes'],
+        "total_comments": total_metrics['total_comments'],
         "total_prizes": total_prizes,
         "expiring_tokens_count": expiring_tokens_count,
+        # dashboard_stats mosligi uchun:
+        "users_by_status": {item['status']: item['count'] for item in users_by_status},
+        "links_by_status": {item['status']: item['count'] for item in links_by_status},
+    }
+
+    cache.set('admin_summary_cache', data, timeout=60)
+    return Response(data)
+
+dashboard_stats = admin_summary
+
+
+# ==========================================
+# User Statistika API lari (/api/me/...)
+# ==========================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_summary(request):
+    """
+    Faqat joriy foydalanuvchining o'z statistikasi:
+    jami views, like, comment, postlar soni, prizlar soni, oxirgi tekshiruv vaqti.
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response({
+            "total_views": 0,
+            "total_likes": 0,
+            "total_comments": 0,
+            "posts_count": 0,
+            "prizes_count": 0,
+            "last_checked_at": None,
+        })
+
+    posts_qs = Post.objects.filter(link__user=ig_user)
+    metrics = posts_qs.aggregate(
+        total_views=Coalesce(Sum('views'), 0),
+        total_likes=Coalesce(Sum('likes'), 0),
+        total_comments=Coalesce(Sum('comments_count'), 0),
+        last_checked_at=Max('last_checked_at'),
+    )
+
+    posts_count = posts_qs.count()
+    prizes_count = Prize.objects.filter(post__link__user=ig_user).count()
+
+    return Response({
+        "total_views": metrics['total_views'],
+        "total_likes": metrics['total_likes'],
+        "total_comments": metrics['total_comments'],
+        "posts_count": posts_count,
+        "prizes_count": prizes_count,
+        "last_checked_at": metrics['last_checked_at'],
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_posts(request):
+    """
+    Foydalanuvchining o'z postlari (pagination bilan).
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"count": 0, "next": None, "previous": None, "results": []})
+
+    qs = Post.objects.select_related('link__user').filter(link__user=ig_user).order_by('-id')
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    serializer = PostSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_post_history(request, post_id):
+    """
+    PostStat tarixi (grafik uchun, vaqt bo'yicha o'sish tartibida).
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"error": "Post topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+    post = get_object_or_404(Post.objects.select_related('link__user'), id=post_id, link__user=ig_user)
+    stats = post.stats.all().order_by('checked_at')
+    data = [
+        {
+            "id": s.id,
+            "checked_at": s.checked_at,
+            "views": s.views,
+            "likes": s.likes,
+            "comments_count": s.comments_count,
+        }
+        for s in stats
+    ]
+    return Response(data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_notifications(request):
+    """
+    Foydalanuvchining bildirishnomalari va o'qilmaganlar soni.
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"unread_count": 0, "count": 0, "next": None, "previous": None, "results": []})
+
+    qs = Notification.objects.filter(user=ig_user).order_by('-created_at')
+    unread_count = qs.filter(is_read=False).count()
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    serializer = NotificationSerializer(page, many=True)
+    resp = paginator.get_paginated_response(serializer.data)
+    resp.data['unread_count'] = unread_count
+    return resp
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def me_notifications_read(request):
+    """
+    Bildirishnomani o'qilgan deb belgilash (bitta yoki barchasini).
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"message": "Barcha bildirishnomalar o'qildi deb belgilandi.", "affected": 0})
+
+    notif_id = request.data.get('id')
+    if notif_id:
+        notif = get_object_or_404(Notification, id=notif_id, user=ig_user)
+        notif.is_read = True
+        notif.save(update_fields=['is_read'])
+        return Response({"message": "Bildirishnoma o'qildi deb belgilandi.", "affected": 1})
+
+    affected = Notification.objects.filter(user=ig_user, is_read=False).update(is_read=True)
+    return Response({"message": "Barcha bildirishnomalar o'qildi deb belgilandi.", "affected": affected})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_prizes(request):
+    """
+    Foydalanuvchining sovrinlari.
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"count": 0, "next": None, "previous": None, "results": []})
+
+    qs = Prize.objects.filter(post__link__user=ig_user).select_related('post__link__user').order_by('-id')
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    serializer = PrizeSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+
+# ==========================================
+# Admin Statistika API lari (/api/admin/...)
+# ==========================================
+
+@api_view(['GET'])
+@permission_classes([IsAdminRole])
+def admin_users_list(request):
+    """
+    Admin: Har user bo'yicha statistika (postlar, views, likes, comments, oxirgi post sanasi, holati),
+    qidiruv, filtr, saralash va pagination bilan. N+1 yo'q.
+    """
+    qs = InstagramUser.objects.select_related('user').annotate(
+        posts_count=Count('links__post', distinct=True),
+        total_views=Coalesce(Sum('links__post__views'), 0),
+        total_likes=Coalesce(Sum('links__post__likes'), 0),
+        total_comments=Coalesce(Sum('links__post__comments_count'), 0),
+        last_posted_at=Max('links__post__posted_at'),
+    )
+
+    search = request.query_params.get('search')
+    if search:
+        qs = qs.filter(
+            Q(name__icontains=search) |
+            Q(user__username__icontains=search) |
+            Q(ig_user_id__icontains=search)
+        )
+
+    status_param = request.query_params.get('status')
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    ordering = request.query_params.get('ordering', '-id')
+    valid_orderings = ['id', '-id', 'total_views', '-total_views', 'posts_count', '-posts_count', 'created_at', '-created_at', 'last_posted_at', '-last_posted_at']
+    if ordering in valid_orderings:
+        qs = qs.order_by(ordering)
+    else:
+        qs = qs.order_by('-id')
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    data = [
+        {
+            "id": u.id,
+            "username": u.user.username if u.user else "",
+            "name": u.name,
+            "ig_user_id": u.ig_user_id,
+            "status": u.status,
+            "posts_count": u.posts_count,
+            "total_views": u.total_views,
+            "total_likes": u.total_likes,
+            "total_comments": u.total_comments,
+            "last_posted_at": u.last_posted_at,
+            "created_at": u.created_at,
+            "has_token": bool(u.access_token),
+        }
+        for u in page
+    ]
+    return paginator.get_paginated_response(data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminRole])
+def admin_user_detail(request, user_id):
+    """
+    Admin: Foydalanuvchi tafsilotlari va uning postlari / statistikasi tarixi.
+    """
+    u = get_object_or_404(
+        InstagramUser.objects.select_related('user').annotate(
+            posts_count=Count('links__post', distinct=True),
+            total_views=Coalesce(Sum('links__post__views'), 0),
+            total_likes=Coalesce(Sum('links__post__likes'), 0),
+            total_comments=Coalesce(Sum('links__post__comments_count'), 0),
+            last_posted_at=Max('links__post__posted_at'),
+        ),
+        pk=user_id
+    )
+
+    posts = Post.objects.filter(link__user=u).order_by('-id').prefetch_related('stats')
+    posts_data = []
+    for p in posts:
+        posts_data.append({
+            "id": p.id,
+            "status": p.status,
+            "permalink": p.permalink,
+            "views": p.views,
+            "likes": p.likes,
+            "comments_count": p.comments_count,
+            "posted_at": p.posted_at,
+            "deleted_detected_at": p.deleted_detected_at,
+            "history": [
+                {
+                    "checked_at": s.checked_at,
+                    "views": s.views,
+                    "likes": s.likes,
+                    "comments_count": s.comments_count,
+                }
+                for s in p.stats.all()
+            ]
+        })
+
+    return Response({
+        "id": u.id,
+        "username": u.user.username if u.user else "",
+        "name": u.name,
+        "ig_user_id": u.ig_user_id,
+        "status": u.status,
+        "posts_count": u.posts_count,
+        "total_views": u.total_views,
+        "total_likes": u.total_likes,
+        "total_comments": u.total_comments,
+        "last_posted_at": u.last_posted_at,
+        "created_at": u.created_at,
+        "posts": posts_data,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminRole])
+def admin_posts_list(request):
+    """
+    Admin: Filtr (status, sana oralig'i, user), saralash (views), pagination bilan postlar ro'yxati.
+    O'chirilgan postlar va deleted_detected_at ko'rinadi.
+    """
+    qs = Post.objects.select_related('link__user').all()
+
+    status_param = request.query_params.get('status')
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    user_param = request.query_params.get('user')
+    if user_param:
+        qs = qs.filter(link__user_id=user_param)
+
+    start_date = request.query_params.get('start_date')
+    if start_date:
+        qs = qs.filter(posted_at__date__gte=start_date)
+    end_date = request.query_params.get('end_date')
+    if end_date:
+        qs = qs.filter(posted_at__date__lte=end_date)
+
+    ordering = request.query_params.get('ordering', '-id')
+    valid_orderings = ['views', '-views', 'posted_at', '-posted_at', 'id', '-id']
+    if ordering in valid_orderings:
+        qs = qs.order_by(ordering)
+    else:
+        qs = qs.order_by('-id')
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    serializer = PostSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminRole])
+def admin_stats_daily(request):
+    """
+    Admin: Kunlar bo'yicha yangi postlar va jami views (grafik uchun).
+    """
+    start_date = request.query_params.get('start_date')
+    end_date = request.query_params.get('end_date')
+
+    qs = Post.objects.filter(posted_at__isnull=False)
+    if start_date:
+        qs = qs.filter(posted_at__date__gte=start_date)
+    if end_date:
+        qs = qs.filter(posted_at__date__lte=end_date)
+    if not start_date and not end_date:
+        thirty_days_ago = timezone.now().date() - timedelta(days=30)
+        qs = qs.filter(posted_at__date__gte=thirty_days_ago)
+
+    daily_stats = (
+        qs.annotate(date=TruncDate('posted_at'))
+        .values('date')
+        .annotate(
+            new_posts=Count('id'),
+            total_views=Coalesce(Sum('views'), 0),
+            total_likes=Coalesce(Sum('likes'), 0),
+        )
+        .order_by('date')
+    )
+    return Response(list(daily_stats))
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminRole])
+def admin_export_posts_csv(request):
+    """
+    Admin: Filtrga mos postlarni oqimli (StreamingHttpResponse) CSV qilib eksport qilish.
+    Katta ma'lumotlarda xotirani to'ldirmaydi.
+    """
+    qs = Post.objects.select_related('link__user').all()
+
+    status_param = request.query_params.get('status')
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    user_param = request.query_params.get('user')
+    if user_param:
+        qs = qs.filter(link__user_id=user_param)
+
+    start_date = request.query_params.get('start_date')
+    if start_date:
+        qs = qs.filter(posted_at__date__gte=start_date)
+    end_date = request.query_params.get('end_date')
+    if end_date:
+        qs = qs.filter(posted_at__date__lte=end_date)
+
+    qs = qs.order_by('-id')
+
+    def row_generator():
+        pseudo_buffer = Echo()
+        writer = csv.writer(pseudo_buffer)
+        yield writer.writerow(['Post ID', 'User', 'Status', 'Views', 'Likes', 'Comments', 'Posted At', 'Deleted Detected At', 'Permalink'])
+        for post in qs.iterator(chunk_size=2000):
+            user_name = post.link.user.name if hasattr(post, 'link') and post.link and post.link.user else ""
+            yield writer.writerow([
+                post.id,
+                user_name,
+                post.status,
+                post.views,
+                post.likes,
+                post.comments_count,
+                post.posted_at.strftime('%Y-%m-%d %H:%M:%S') if post.posted_at else "",
+                post.deleted_detected_at.strftime('%Y-%m-%d %H:%M:%S') if post.deleted_detected_at else "",
+                post.permalink or "",
+            ])
+
+    response = StreamingHttpResponse(row_generator(), content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="posts.csv"'
+    return response
 
 
 @api_view(['GET'])

@@ -1453,3 +1453,181 @@ class Phase5StatsEngineTestCase(TestCase):
         self.assertEqual(next_check, now + timedelta(minutes=15))
 
 
+class Phase6StatsApiTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = APIClient()
+
+        # Admin
+        self.admin = User.objects.create_superuser(username="admin_p6", password="password")
+        self.ig_admin = InstagramUser.objects.create(name="Admin P6", user=self.admin)
+
+        # User A
+        self.user_a = User.objects.create_user(username="user_p6_a", password="password")
+        self.ig_user_a = InstagramUser.objects.create(name="User P6 A", user=self.user_a, status='connected')
+        self.link_a = UniqueLink.objects.create(user=self.ig_user_a)
+        self.post_a1 = Post.objects.create(
+            link=self.link_a,
+            status='published',
+            views=300,
+            likes=20,
+            comments_count=5,
+            posted_at=timezone.now() - timedelta(days=2),
+            last_checked_at=timezone.now() - timedelta(hours=1),
+        )
+        self.stat_a1_1 = PostStat.objects.create(post=self.post_a1, views=100, likes=5, comments_count=1)
+        self.stat_a1_2 = PostStat.objects.create(post=self.post_a1, views=300, likes=20, comments_count=5)
+        self.prize_a = Prize.objects.create(post=self.post_a1, milestone=100)
+
+        # User B
+        self.user_b = User.objects.create_user(username="user_p6_b", password="password")
+        self.ig_user_b = InstagramUser.objects.create(name="User P6 B", user=self.user_b, status='connected')
+        self.link_b = UniqueLink.objects.create(user=self.ig_user_b)
+        self.post_b = Post.objects.create(
+            link=self.link_b,
+            status='deleted',
+            views=800,
+            likes=40,
+            comments_count=10,
+            posted_at=timezone.now() - timedelta(days=5),
+            deleted_detected_at=timezone.now() - timedelta(days=1),
+        )
+        self.stat_b = PostStat.objects.create(post=self.post_b, views=800, likes=40, comments_count=10)
+
+    def test_me_summary(self):
+        self.client.force_authenticate(user=self.user_a)
+        resp = self.client.get("/api/me/summary/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['total_views'], 300)
+        self.assertEqual(data['total_likes'], 20)
+        self.assertEqual(data['total_comments'], 5)
+        self.assertEqual(data['posts_count'], 1)
+        self.assertEqual(data['prizes_count'], 1)
+        self.assertIsNotNone(data['last_checked_at'])
+
+    def test_me_posts(self):
+        self.client.force_authenticate(user=self.user_a)
+        resp = self.client.get("/api/me/posts/")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()['results']
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['id'], self.post_a1.id)
+        # User B ning posti ko'rinmasligi kerak
+        post_ids = [p['id'] for p in results]
+        self.assertNotIn(self.post_b.id, post_ids)
+
+    def test_me_post_history_security(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        # O'z postining tarixi ko'rinadi
+        resp_own = self.client.get(f"/api/me/posts/{self.post_a1.id}/history/")
+        self.assertEqual(resp_own.status_code, 200)
+        self.assertEqual(len(resp_own.json()), 2)
+        self.assertEqual(resp_own.json()[0]['views'], 100)
+        self.assertEqual(resp_own.json()[1]['views'], 300)
+
+        # Boshqa userning post tarixini so'raganda 404 qaytadi
+        resp_other = self.client.get(f"/api/me/posts/{self.post_b.id}/history/")
+        self.assertEqual(resp_other.status_code, 404)
+
+    def test_me_notifications_and_read(self):
+        self.client.force_authenticate(user=self.user_a)
+        resp = self.client.get("/api/me/notifications/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertGreaterEqual(data['unread_count'], 1)
+
+        # O'qilgan deb belgilash
+        resp_read = self.client.post("/api/me/notifications/read/")
+        self.assertEqual(resp_read.status_code, 200)
+
+        # Qayta tekshirganda unread_count 0 bo'ladi
+        resp2 = self.client.get("/api/me/notifications/")
+        self.assertEqual(resp2.json()['unread_count'], 0)
+
+    def test_me_prizes(self):
+        self.client.force_authenticate(user=self.user_a)
+        resp = self.client.get("/api/me/prizes/")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()['results']
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['milestone'], 100)
+
+    def test_admin_summary_and_caching(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/api/admin/summary/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("total_users", data)
+        self.assertIn("posts_by_status", data)
+        self.assertEqual(data['posts_by_status']['published'], 1)
+        self.assertEqual(data['posts_by_status']['deleted'], 1)
+        self.assertEqual(data['total_views'], 1100)  # 300 + 800
+
+        # Oddiy user kirishi taqiqlangan
+        self.client.force_authenticate(user=self.user_a)
+        resp_forbidden = self.client.get("/api/admin/summary/")
+        self.assertEqual(resp_forbidden.status_code, 403)
+
+    def test_admin_users_list_and_detail(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/api/admin/users/")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()['results']
+        self.assertGreaterEqual(len(results), 2)
+        user_names = [u['name'] for u in results]
+        self.assertIn("User P6 A", user_names)
+
+        # Detail tekshirish
+        resp_detail = self.client.get(f"/api/admin/users/{self.ig_user_a.id}/")
+        self.assertEqual(resp_detail.status_code, 200)
+        d_data = resp_detail.json()
+        self.assertEqual(d_data['total_views'], 300)
+        self.assertEqual(len(d_data['posts']), 1)
+        self.assertEqual(len(d_data['posts'][0]['history']), 2)
+
+    def test_admin_posts_filtering_and_deleted(self):
+        self.client.force_authenticate(user=self.admin)
+
+        # Deleted postlarni filtrlash
+        resp_del = self.client.get("/api/admin/posts/?status=deleted")
+        self.assertEqual(resp_del.status_code, 200)
+        results = resp_del.json()['results']
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['id'], self.post_b.id)
+        self.assertIsNotNone(results[0]['deleted_detected_at'])
+
+        # Views bo'yicha tartiblash
+        resp_sort = self.client.get("/api/admin/posts/?ordering=-views")
+        self.assertEqual(resp_sort.status_code, 200)
+        results_sort = resp_sort.json()['results']
+        self.assertEqual(results_sort[0]['id'], self.post_b.id)
+
+    def test_admin_stats_daily(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/api/admin/stats/daily/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(isinstance(data, list))
+        self.assertGreaterEqual(len(data), 1)
+
+    def test_admin_export_posts_csv(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/api/admin/export/posts.csv")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'text/csv')
+        self.assertIn('attachment; filename="posts.csv"', resp['Content-Disposition'])
+        content = b"".join(resp.streaming_content).decode('utf-8')
+        self.assertIn("Post ID,User,Status,Views", content)
+        self.assertIn("User P6 A", content)
+        self.assertIn("User P6 B", content)
+
+    def test_admin_users_n_plus_one_avoidance(self):
+        self.client.force_authenticate(user=self.admin)
+        with self.assertNumQueries(2):
+            resp = self.client.get("/api/admin/users/")
+            self.assertEqual(resp.status_code, 200)
+
+

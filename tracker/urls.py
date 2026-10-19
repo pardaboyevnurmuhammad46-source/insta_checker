@@ -26,6 +26,18 @@ from .views import (
     user_publish_video,
     user_publish_status,
     user_retry_publish,
+    admin_summary,
+    admin_users_list,
+    admin_user_detail,
+    admin_posts_list,
+    admin_stats_daily,
+    admin_export_posts_csv,
+    me_summary,
+    me_posts,
+    me_post_history,
+    me_notifications,
+    me_notifications_read,
+    me_prizes,
 )
 
 router = DefaultRouter()
@@ -39,15 +51,30 @@ router.register(r'notifications', NotificationViewSet)
 router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
+    # User endpoints
     path('api/me/', current_user_profile, name='current_user_profile'),
+    path('api/me/summary/', me_summary, name='me_summary'),
+    path('api/me/posts/', me_posts, name='me_posts'),
+    path('api/me/posts/<int:post_id>/history/', me_post_history, name='me_post_history'),
+    path('api/me/notifications/', me_notifications, name='me_notifications'),
+    path('api/me/notifications/read/', me_notifications_read, name='me_notifications_read'),
+    path('api/me/prizes/', me_prizes, name='me_prizes'),
     path('api/user/connect-instagram/', user_connect_instagram, name='user_connect_instagram'),
     path('api/user/publish/', user_publish_video, name='user_publish_video'),
     path('api/user/publish-status/', user_publish_status, name='user_publish_status'),
     path('api/user/retry/', user_retry_publish, name='user_retry_publish'),
+
+    # Admin endpoints
+    path('api/admin/summary/', admin_summary, name='admin_summary'),
+    path('api/admin/users/', admin_users_list, name='admin_users_list'),
+    path('api/admin/users/<int:user_id>/', admin_user_detail, name='admin_user_detail'),
+    path('api/admin/posts/', admin_posts_list, name='admin_posts_list'),
+    path('api/admin/stats/daily/', admin_stats_daily, name='admin_stats_daily'),
+    path('api/admin/export/posts.csv', admin_export_posts_csv, name='admin_export_posts_csv'),
     path('api/admin/create-user/', admin_create_user, name='admin_create_user'),
     path('api/admin/reset-password/', admin_reset_password, name='admin_reset_password'),
-    path('api/change-password/', change_password, name='change_password'),
     path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
+    path('api/change-password/', change_password, name='change_password'),
     path('api/public/post/<uuid:token>/', user_portal_api, name='user_portal_api'),
     path('api/', include(router.urls)),
     path('link/', link_info, name='link_info'),
