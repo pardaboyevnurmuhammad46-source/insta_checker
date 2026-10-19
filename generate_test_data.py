@@ -2,79 +2,225 @@ import os
 import django
 from django.utils import timezone
 from datetime import timedelta
-import time
-import random
+from django.core.files.base import ContentFile
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
-from tracker.models import InstagramUser, UniqueLink, Post, Video
-from tracker.tasks import check_all_due_posts_task
 from django.contrib.auth.models import User
+from tracker.models import InstagramUser, UniqueLink, Post, PostStat, Prize, Notification, Video
 
-def run():
-    print("Test ma'lumotlarini yaratish boshlandi...")
-    
-    # 1. Tizim uchun yagona default video yaratamiz
-    video, _ = Video.objects.get_or_create(
-        title="Load Test Video",
-        is_default=True,
-        defaults={'file': 'videos/load_test.mp4'}
+
+def generate_demo_data():
+    print("Namunaviy ko'rgazmali ma'lumotlarni yaratish boshlandi...")
+
+    # 1. Admin foydalanuvchi
+    admin_user, _ = User.objects.get_or_create(
+        username="admin",
+        defaults={"is_staff": True, "is_superuser": True}
     )
-    
-    # 2. Bitta foydalanuvchi yaratamiz
-    user, _ = User.objects.get_or_create(username="loadtest_user", defaults={"password": "password"})
-    ig_user, _ = InstagramUser.objects.get_or_create(
-        user=user,
+    admin_user.set_password("admin123")
+    admin_user.is_staff = True
+    admin_user.is_superuser = True
+    admin_user.save()
+
+    ig_admin, _ = InstagramUser.objects.get_or_create(
+        user=admin_user,
         defaults={
-            "name": "Load Test",
-            "ig_user_id": "123456789",
-            "access_token": "fake_token",
-            "status": "connected"
+            "name": "Bosh Administrator",
+            "ig_user_id": "1784140001",
+            "status": "connected",
         }
     )
-    
-    # 3. 10 000 ta "tekshiruv vaqti kelgan" postlarni ommaviy (bulk) yaratamiz
-    total_posts = 10000
-    links_to_create = []
-    
-    # Eskilarini tozalash (agar kerak bo'lsa)
-    print("Eski load test ma'lumotlari tozalanmoqda...")
-    UniqueLink.objects.filter(user=ig_user).delete()
-    
-    print(f"{total_posts} ta UniqueLink yaratilmoqda...")
-    for i in range(total_posts):
-        links_to_create.append(UniqueLink(user=ig_user, video=video, status='posted'))
-    UniqueLink.objects.bulk_create(links_to_create, batch_size=2000)
-    
-    created_links = list(UniqueLink.objects.filter(user=ig_user).values_list('id', flat=True))
-    
-    print(f"{total_posts} ta Post yaratilmoqda...")
-    now = timezone.now()
-    past_due = now - timedelta(minutes=5)
-    posts_to_create = []
-    
-    for i, link_id in enumerate(created_links):
-        posts_to_create.append(Post(
-            link_id=link_id,
-            status='published',
-            ig_media_id=f"media_{i}",
-            permalink=f"https://instagram.com/reel/media_{i}/",
-            posted_at=now - timedelta(days=1),
-            next_check_at=past_due,
-            views=random.randint(100, 400)
-        ))
-        
-    Post.objects.bulk_create(posts_to_create, batch_size=2000)
-    
-    print("Barcha ma'lumotlar yaratildi. check_all_due_posts_task ishga tushirilmoqda...")
-    
-    start_time = time.time()
-    dispatched = check_all_due_posts_task()
-    end_time = time.time()
-    
-    print(f"Jami yuborilgan postlar: {dispatched}")
-    print(f"Bajarishga ketgan vaqt: {end_time - start_time:.2f} soniya")
+
+    # 2. Umumiy (Default) Video
+    default_video, _ = Video.objects.get_or_create(
+        title="Rasmiy Promo Video (Default)",
+        is_default=True,
+        defaults={
+            "is_active": True,
+        }
+    )
+    if not default_video.file:
+        default_video.file.save("default_promo.mp4", ContentFile(b"fake_mp4_video_content_data"))
+        default_video.save()
+
+    # 3. Foydalanuvchi 1: Bekzod (Faol, postlari va sovrinlari bor)
+    user_bekzod, _ = User.objects.get_or_create(username="bekzod")
+    user_bekzod.set_password("user123")
+    user_bekzod.save()
+
+    ig_bekzod, _ = InstagramUser.objects.get_or_create(
+        user=user_bekzod,
+        defaults={
+            "name": "Bekzod Aliyev",
+            "ig_user_id": "1784140002",
+            "access_token": "demo_long_lived_token_bekzod",
+            "status": "connected",
+            "token_expires_at": timezone.now() + timedelta(days=45),
+        }
+    )
+    ig_bekzod.status = 'connected'
+    ig_bekzod.access_token = 'demo_long_lived_token_bekzod'
+    ig_bekzod.token_expires_at = timezone.now() + timedelta(days=45)
+    ig_bekzod.save()
+
+    # Bekzodning shaxsiy videosi
+    personal_video, _ = Video.objects.get_or_create(
+        title="Bekzod Maxsus Reels",
+        owner=ig_bekzod,
+        defaults={"is_active": True, "is_default": False}
+    )
+    if not personal_video.file:
+        personal_video.file.save("bekzod_reels.mp4", ContentFile(b"fake_bekzod_mp4_data"))
+        personal_video.save()
+
+    # Bekzodning Post 1: 1 250 ko'rish (500 va 1000 marralarga yetgan)
+    link1, _ = UniqueLink.objects.get_or_create(
+        user=ig_bekzod,
+        defaults={"status": "posted", "video": personal_video}
+    )
+    post1, _ = Post.objects.get_or_create(
+        link=link1,
+        defaults={
+            "status": "published",
+            "ig_media_id": "18012345678",
+            "permalink": "https://www.instagram.com/reel/C123456789/",
+            "views": 1250,
+            "likes": 94,
+            "comments_count": 22,
+            "posted_at": timezone.now() - timedelta(days=4),
+            "last_checked_at": timezone.now() - timedelta(minutes=10),
+            "next_check_at": timezone.now() + timedelta(hours=3),
+        }
+    )
+    post1.views = 1250
+    post1.likes = 94
+    post1.comments_count = 22
+    post1.save()
+
+    # Tarix (PostStat) yozish
+    if post1.stats.count() == 0:
+        PostStat.objects.create(post=post1, views=120, likes=10, comments_count=2, checked_at=timezone.now() - timedelta(days=3, hours=18))
+        PostStat.objects.create(post=post1, views=350, likes=28, comments_count=7, checked_at=timezone.now() - timedelta(days=3))
+        PostStat.objects.create(post=post1, views=580, likes=45, comments_count=11, checked_at=timezone.now() - timedelta(days=2))
+        PostStat.objects.create(post=post1, views=920, likes=71, comments_count=16, checked_at=timezone.now() - timedelta(days=1))
+        PostStat.objects.create(post=post1, views=1250, likes=94, comments_count=22, checked_at=timezone.now() - timedelta(minutes=10))
+
+    # Prizlar (500 va 1000)
+    Prize.objects.get_or_create(post=post1, milestone=500, defaults={"sent_at": timezone.now() - timedelta(days=2)})
+    Prize.objects.get_or_create(post=post1, milestone=1000, defaults={"sent_at": timezone.now() - timedelta(days=1)})
+
+    # Bekzodning Post 2: 420 ko'rish (500 marraga yaqinlashgan, 80% dan oshgan!)
+    link2, _ = UniqueLink.objects.get_or_create(
+        user=ig_bekzod,
+        token="b1234567-89ab-cdef-0123-456789abcdef",
+        defaults={"status": "posted", "video": personal_video}
+    )
+    post2, _ = Post.objects.get_or_create(
+        link=link2,
+        defaults={
+            "status": "published",
+            "ig_media_id": "18098765432",
+            "permalink": "https://www.instagram.com/reel/C987654321/",
+            "views": 420,
+            "likes": 35,
+            "comments_count": 8,
+            "posted_at": timezone.now() - timedelta(hours=14),
+            "last_checked_at": timezone.now() - timedelta(minutes=12),
+            "next_check_at": timezone.now() + timedelta(minutes=15),
+        }
+    )
+
+    # Bekzodning Post 3: O'chirilgan post (Deleted)
+    link3, _ = UniqueLink.objects.get_or_create(
+        user=ig_bekzod,
+        token="c1234567-89ab-cdef-0123-456789abcdef",
+        defaults={"status": "posted", "video": default_video}
+    )
+    Post.objects.get_or_create(
+        link=link3,
+        defaults={
+            "status": "deleted",
+            "ig_media_id": "18011223344",
+            "views": 65,
+            "likes": 4,
+            "comments_count": 1,
+            "posted_at": timezone.now() - timedelta(days=8),
+            "deleted_detected_at": timezone.now() - timedelta(days=2),
+            "error": "Instagram'dan post o'chirilgan.",
+        }
+    )
+
+    # 4. Foydalanuvchi 2: Dilshod (Token muddati 3 kundan keyin tugaydi - warning uchun)
+    user_dilshod, _ = User.objects.get_or_create(username="dilshod")
+    user_dilshod.set_password("user123")
+    user_dilshod.save()
+
+    ig_dilshod, _ = InstagramUser.objects.get_or_create(
+        user=user_dilshod,
+        defaults={
+            "name": "Dilshod Karimov",
+            "ig_user_id": "1784140003",
+            "status": "connected",
+            "token_expires_at": timezone.now() + timedelta(days=3),
+        }
+    )
+
+    link_dilshod, _ = UniqueLink.objects.get_or_create(
+        user=ig_dilshod,
+        defaults={"status": "posted", "video": default_video}
+    )
+    Post.objects.get_or_create(
+        link=link_dilshod,
+        defaults={
+            "status": "published",
+            "ig_media_id": "18055667788",
+            "permalink": "https://www.instagram.com/reel/C556677889/",
+            "views": 530,
+            "likes": 42,
+            "comments_count": 9,
+            "posted_at": timezone.now() - timedelta(days=2),
+            "last_checked_at": timezone.now() - timedelta(hours=2),
+        }
+    )
+
+    # 5. Foydalanuvchi 3: Nodira (Yangi ro'yxatdan o'tgan, Instagramga hali ulanmagan)
+    user_nodira, _ = User.objects.get_or_create(username="nodira")
+    user_nodira.set_password("user123")
+    user_nodira.save()
+
+    InstagramUser.objects.get_or_create(
+        user=user_nodira,
+        defaults={
+            "name": "Nodira Rustamova",
+            "status": "pending",
+        }
+    )
+
+    print("\n" + "=" * 50)
+    print("NAMUNAVIY MA'LUMOTLAR MUVAFFAQIYATLI YARATILDI!")
+    print("=" * 50)
+    print("Kirish ma'lumotlari (Web panel uchun):")
+    print("1. Administrator:")
+    print("   Login:    admin")
+    print("   Parol:    admin123")
+    print("   Panel:    http://localhost:8080/admin-panel")
+    print("")
+    print("2. Faol Foydalanuvchi (Postlari va sovrinlari bor):")
+    print("   Login:    bekzod")
+    print("   Parol:    user123")
+    print("   Panel:    http://localhost:8080/app")
+    print("")
+    print("3. Ogohlantirishli Foydalanuvchi (Token muddati yaqin):")
+    print("   Login:    dilshod")
+    print("   Parol:    user123")
+    print("")
+    print("4. Yangi Foydalanuvchi (Ulanmagan):")
+    print("   Login:    nodira")
+    print("   Parol:    user123")
+    print("=" * 50)
+
 
 if __name__ == '__main__':
-    run()
+    generate_demo_data()
