@@ -175,6 +175,61 @@ def refresh_user_token(user: InstagramUser) -> bool:
         return False
 
 
+REQUIRED_PERMISSIONS = {
+    'instagram_business_content_publish',
+    'instagram_business_manage_insights',
+    'instagram_business_manage_comments',
+}
+
+
+def verify_token_permissions(access_token: str) -> tuple[bool, list[str]]:
+    """
+    Instagram foydalanuvchi tokeni kerakli ruxsatlarga ega ekanini tekshiradi:
+    - publish (instagram_business_content_publish)
+    - insights (instagram_business_manage_insights)
+    - comments (instagram_business_manage_comments)
+    """
+    url = "https://graph.instagram.com/me/permissions"
+    try:
+        response = requests.get(url, params={'access_token': access_token}, timeout=15)
+    except requests.RequestException as exc:
+        raise InstagramNetworkError(f"Ruxsatlarni tekshirishda tarmoq xatoligi: {exc}") from exc
+
+    if response.status_code != 200:
+        return True, []
+
+    data = response.json().get('data')
+    if data is None:
+        return True, []
+
+    granted = {
+        item.get('permission') for item in data
+        if item.get('status') == 'granted'
+    }
+    missing = [perm for perm in REQUIRED_PERMISSIONS if perm not in granted]
+    return (len(missing) == 0, missing)
+
+
+def check_instagram_account_type(access_token: str, ig_user_id: str = 'me') -> str:
+    """
+    Instagram akkaunt turini tekshiradi (BUSINESS, MEDIA_CREATOR, PERSONAL).
+    """
+    url = f"https://graph.instagram.com/v21.0/{ig_user_id}"
+    try:
+        response = requests.get(url, params={'fields': 'account_type,username', 'access_token': access_token}, timeout=15)
+    except requests.RequestException as exc:
+        raise InstagramNetworkError(f"Akkaunt turini tekshirishda tarmoq xatosi: {exc}") from exc
+
+    if response.status_code != 200:
+        return 'BUSINESS'
+
+    data = response.json()
+    acc_type = data.get('account_type')
+    if not acc_type:
+        return 'BUSINESS'
+    return str(acc_type).upper()
+
+
 def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, UniqueLink]:
     try:
         link = UniqueLink.objects.select_related('user').get(token=token)
@@ -195,6 +250,27 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
     except InstagramOAuthError:
         final_token = short_lived_token
         expires_in = 3600
+
+    # Token ruxsatlarini tekshirish
+    has_perms, missing = verify_token_permissions(final_token)
+    if not has_perms:
+        link.user.status = 'needs_reauth'
+        link.user.save(update_fields=['status'])
+        raise InstagramOAuthError(
+            f"Instagram ruxsatlari to'liq berilmagan ({', '.join(missing)} yetishmayapti). "
+            "Iltimos, qayta ulaning va barcha ruxsatlarga (publish, insights, comments) rozilik bering."
+        )
+
+    # Akkaunt turini tekshirish (faqat Business/Creator akkauntlar qo'llab-quvvatlanadi)
+    acc_type = check_instagram_account_type(final_token, ig_user_id or 'me')
+    if acc_type == 'PERSONAL':
+        link.user.status = 'needs_reauth'
+        link.user.save(update_fields=['status'])
+        raise InstagramOAuthError(
+            "Sizning Instagram akkauntingiz shaxsiy (Personal). "
+            "Reels avtomatik joylash faqat Professional (Business yoki Creator) akkauntlar uchun amal qiladi. "
+            "Iltimos, Instagram hisobingizni Professional akkauntga o'tkazing."
+        )
 
     user = link.user
     user.ig_user_id = ig_user_id or user.ig_user_id
@@ -315,6 +391,19 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     if user.status != 'connected' or not user.access_token or not user.ig_user_id:
         raise InstagramPublishError("Foydalanuvchi Instagram akkauntini ulamagan yoki token yo'q.")
 
+    # Akkaunt turini tekshirish (shaxsiy akkauntlarga Reels joylab bo'lmaydi)
+    acc_type = check_instagram_account_type(user.access_token, user.ig_user_id)
+    if acc_type == 'PERSONAL':
+        err_msg = "Sizning Instagram akkauntingiz shaxsiy (Personal). Reels avtomatik joylash faqat Professional (Business yoki Creator) akkauntlar uchun amal qiladi."
+        post, _ = Post.objects.get_or_create(link=link)
+        post.status = 'failed'
+        post.error = err_msg
+        post.save(update_fields=['status', 'error'])
+        link.status = 'failed'
+        link.save(update_fields=['status'])
+        raise InstagramPublishError(err_msg)
+
+    # 1-bosqichdagi video tanlash qoidasi orqali videoni aniqlash
     # if not link.video:
     #     raise InstagramPublishError("Joylash uchun video fayl mavjud emas.")
     chosen_video = get_video_for_user(user) or link.video
@@ -366,15 +455,23 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         link.save(update_fields=['status'])
 
         return post
-
     except Exception as exc:
         post.status = 'failed'
-        post.error = str(exc)
+        clean_err = str(exc)
+        if "access_token" in clean_err:
+            clean_err = "Instagram API autentifikatsiya xatoligi yuz berdi."
+        post.error = clean_err[:500]
         post.save(update_fields=['status', 'error'])
-
         link.status = 'failed'
         link.save(update_fields=['status'])
         raise
+    # except Exception as exc:
+    #     post.status = 'failed'
+    #     post.error = str(exc)
+    #     post.save(update_fields=['status', 'error'])
+    #     link.status = 'failed'
+    #     link.save(update_fields=['status'])
+    #     raise
 
 
 # ==========================================

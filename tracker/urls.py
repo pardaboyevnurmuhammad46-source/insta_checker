@@ -22,6 +22,10 @@ from .views import (
     admin_create_user,
     admin_reset_password,
     change_password,
+    user_connect_instagram,
+    user_publish_video,
+    user_publish_status,
+    user_retry_publish,
 )
 
 router = DefaultRouter()
@@ -36,6 +40,10 @@ router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
     path('api/me/', current_user_profile, name='current_user_profile'),
+    path('api/user/connect-instagram/', user_connect_instagram, name='user_connect_instagram'),
+    path('api/user/publish/', user_publish_video, name='user_publish_video'),
+    path('api/user/publish-status/', user_publish_status, name='user_publish_status'),
+    path('api/user/retry/', user_retry_publish, name='user_retry_publish'),
     path('api/admin/create-user/', admin_create_user, name='admin_create_user'),
     path('api/admin/reset-password/', admin_reset_password, name='admin_reset_password'),
     path('api/change-password/', change_password, name='change_password'),

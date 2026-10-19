@@ -233,11 +233,20 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
         post = self.get_object()
         if post.status != 'failed':
             return Response({"error": "Faqat failed postni qayta joylash mumkin."}, status=status.HTTP_400_BAD_REQUEST)
+        if not (request.user.is_staff or request.user.is_superuser) and post.retry_count >= 3:
+            return Response({
+                "error": "Qayta urinishlar soni tugadi (maksimal: 3 marta).",
+                "retry_count": post.retry_count
+            }, status=status.HTTP_400_BAD_REQUEST)
+        post.retry_count += 1
         post.status = 'queued'
         post.error = None
-        post.save(update_fields=['status', 'error'])
+        post.save(update_fields=['status', 'error', 'retry_count'])
         publish_reels_task.delay(post.link.id)
-        return Response({"message": "Post qayta joylash uchun navbatga qo'yildi."})
+        return Response({
+            "message": "Post qayta joylash uchun navbatga qo'yildi.",
+            "retry_count": post.retry_count
+        })
 
 
 class PostStatViewSet(viewsets.ReadOnlyModelViewSet):
@@ -409,6 +418,137 @@ def admin_reset_password(request):
     target_user.set_password(new_password)
     target_user.save()
     return Response({"message": f"Foydalanuvchi ({target_user.username}) paroli muvaffaqiyatli tiklandi."})
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def user_connect_instagram(request):
+    """
+    Foydalanuvchi o'z kabinetidan Instagramga ulanish oqimini boshlaydi.
+    """
+    ig_user, _ = InstagramUser.objects.get_or_create(
+        user=request.user,
+        defaults={'name': request.user.username}
+    )
+    link = UniqueLink.objects.filter(user=ig_user, status__in=['pending', 'opened']).order_by('-id').first()
+    if not link:
+        link = UniqueLink.objects.create(user=ig_user)
+
+    auth_url = build_instagram_auth_url(str(link.token))
+    return Response({
+        "auth_url": auth_url,
+        "link_token": str(link.token),
+        "status": ig_user.status,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def user_publish_video(request):
+    """
+    Ulangan foydalanuvchi uchun videoni Reels qilib joylash vazifasini boshlaydi.
+    Takroriy bosishdan himoyalangan (queued/publishing bo'lsa yangisini boshlamaydi).
+    """
+    ig_user = getattr(request.user, 'instagram_user', None)
+    if not ig_user or ig_user.status != 'connected' or not ig_user.access_token:
+        return Response(
+            {"error": "Instagram hisobingiz ulanmagan. Iltimos, avval hisobingizni ulang."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Takroriy bosishdan himoya
+    active_post = Post.objects.filter(
+        link__user=ig_user,
+        status__in=['queued', 'publishing']
+    ).first()
+    if active_post:
+        return Response({
+            "error": "Videoni joylash allaqachon jarayonda. Iltimos, jarayon yakunlanishini kuting.",
+            "post_id": active_post.id,
+            "status": active_post.status,
+        }, status=status.HTTP_409_CONFLICT)
+
+    link = UniqueLink.objects.filter(user=ig_user, post__isnull=True).order_by('-id').first()
+    if not link:
+        link = UniqueLink.objects.create(user=ig_user)
+
+    post, _ = Post.objects.get_or_create(link=link)
+    post.status = 'queued'
+    post.error = None
+    post.save(update_fields=['status', 'error'])
+
+    publish_reels_task.delay(link.id)
+
+    return Response({
+        "message": "Video Reels sifatida joylash navbatiga qo'yildi.",
+        "post_id": post.id,
+        "status": post.status,
+        "link_token": str(link.token)
+    }, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_publish_status(request):
+    """
+    Foydalanuvchi o'zining so'nggi post holatini (polling) tekshiradi.
+    """
+    ig_user = getattr(request.user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"has_post": False, "status": "none"})
+
+    post = Post.objects.filter(link__user=ig_user).order_by('-id').first()
+    if not post:
+        return Response({"has_post": False, "status": "none"})
+
+    return Response({
+        "has_post": True,
+        "post_id": post.id,
+        "status": post.status,
+        "posted_at": post.posted_at,
+        "views": post.views,
+        "likes": post.likes,
+        "comments_count": post.comments_count,
+        "permalink": post.permalink,
+        "error": post.error,
+        "retry_count": post.retry_count,
+        "can_retry": post.status == 'failed' and post.retry_count < 3
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def user_retry_publish(request):
+    """
+    Muvaffaqiyatsiz bo'lgan postni qayta urinish (maksimal 3 marta).
+    """
+    ig_user = getattr(request.user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"error": "Instagram foydalanuvchisi topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+
+    post = Post.objects.filter(link__user=ig_user, status='failed').order_by('-id').first()
+    if not post:
+        return Response({"error": "Qayta urinish uchun xato bo'lgan post topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+
+    if post.retry_count >= 3:
+        return Response({
+            "error": "Qayta urinishlar soni tugadi (maksimal: 3 marta). Iltimos administrator bilan bog'laning.",
+            "retry_count": post.retry_count
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    post.retry_count += 1
+    post.status = 'queued'
+    post.error = None
+    post.save(update_fields=['status', 'error', 'retry_count'])
+
+    publish_reels_task.delay(post.link.id)
+
+    return Response({
+        "message": "Video qayta joylash navbatiga qo'yildi.",
+        "post_id": post.id,
+        "status": post.status,
+        "retry_count": post.retry_count
+    })
 
 
 @api_view(['GET'])

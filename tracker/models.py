@@ -166,6 +166,7 @@ class Post(models.Model):
     last_checked_at = models.DateTimeField(null=True, blank=True)
     next_check_at = models.DateTimeField(null=True, blank=True, db_index=True)
     error = models.TextField(null=True, blank=True)
+    retry_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ['-id']

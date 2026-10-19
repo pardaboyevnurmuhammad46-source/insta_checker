@@ -1233,3 +1233,148 @@ class Phase3VideoManagementTestCase(TestCase):
         call_kwargs = mock_container.call_args[1]
         self.assertIn(pers_video.file.name, call_kwargs['video_url'])
 
+
+class Phase4UserInstagramAndPublishTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = APIClient()
+
+        # User 1
+        self.user1 = User.objects.create_user(username="p4_user1", password="password")
+        self.ig_user1 = InstagramUser.objects.create(name="P4 User1", user=self.user1)
+
+        # User 2
+        self.user2 = User.objects.create_user(username="p4_user2", password="password")
+        self.ig_user2 = InstagramUser.objects.create(name="P4 User2", user=self.user2)
+
+        # Video
+        f = SimpleUploadedFile("v_p4.mp4", b"video_data", content_type="video/mp4")
+        self.default_video = Video.objects.create(title="Default P4", file=f, is_default=True)
+
+    def test_user_connect_instagram_flow(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.get("/api/user/connect-instagram/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("auth_url", data)
+        self.assertIn("link_token", data)
+        self.assertIn("instagram.com/oauth/authorize", data['auth_url'])
+
+    @patch('tracker.views.publish_reels_task.delay')
+    def test_user_publish_video_and_duplicate_prevention(self, mock_delay):
+        self.client.force_authenticate(user=self.user1)
+
+        # 1. Instagram ulanmagan bo'lsa xato beradi
+        resp_unconnected = self.client.post("/api/user/publish/")
+        self.assertEqual(resp_unconnected.status_code, 400)
+        self.assertIn("ulanmagan", resp_unconnected.json()['error'])
+
+        # Instagram ulaymiz
+        self.ig_user1.status = 'connected'
+        self.ig_user1.access_token = 'token_123'
+        self.ig_user1.ig_user_id = '1784100'
+        self.ig_user1.save()
+
+        # 2. Videoni joylashni boshlash
+        resp_publish = self.client.post("/api/user/publish/")
+        self.assertEqual(resp_publish.status_code, 202)
+        mock_delay.assert_called_once()
+
+        # 3. Takroriy bosishdan himoya (queued holatda)
+        resp_dup = self.client.post("/api/user/publish/")
+        self.assertEqual(resp_dup.status_code, 409)
+        self.assertIn("jarayonda", resp_dup.json()['error'])
+
+    def test_user_publish_status_and_retry_lifecycle(self):
+        self.ig_user1.status = 'connected'
+        self.ig_user1.access_token = 'token_123'
+        self.ig_user1.ig_user_id = '1784100'
+        self.ig_user1.save()
+
+        link = UniqueLink.objects.create(user=self.ig_user1)
+        post = Post.objects.create(link=link, status='failed', error="Tarmoq xatosi", retry_count=0)
+
+        self.client.force_authenticate(user=self.user1)
+
+        # Polling status
+        resp_status = self.client.get("/api/user/publish-status/")
+        self.assertEqual(resp_status.status_code, 200)
+        data = resp_status.json()
+        self.assertTrue(data['has_post'])
+        self.assertEqual(data['status'], 'failed')
+        self.assertTrue(data['can_retry'])
+
+        # 1-marta retry
+        resp_r1 = self.client.post("/api/user/retry/")
+        self.assertEqual(resp_r1.status_code, 200)
+        self.assertEqual(resp_r1.json()['retry_count'], 1)
+
+        # Post yana failed bo'ldi deb belgilaymiz
+        post.refresh_from_db()
+        post.status = 'failed'
+        post.save()
+
+        # 2-marta retry
+        self.client.post("/api/user/retry/")
+        post.refresh_from_db()
+        post.status = 'failed'
+        post.save()
+
+        # 3-marta retry
+        self.client.post("/api/user/retry/")
+        post.refresh_from_db()
+        self.assertEqual(post.retry_count, 3)
+        post.status = 'failed'
+        post.save()
+
+        # 4-marta retry -> rad etiladi (limit: 3)
+        resp_r4 = self.client.post("/api/user/retry/")
+        self.assertEqual(resp_r4.status_code, 400)
+        self.assertIn("tugadi", resp_r4.json()['error'])
+
+    def test_user_cannot_retry_other_user_post(self):
+        link2 = UniqueLink.objects.create(user=self.ig_user2)
+        post2 = Post.objects.create(link=link2, status='failed')
+
+        self.client.force_authenticate(user=self.user1)
+
+        # User 1 User 2 ning postini retry qilmoqchi bo'ladi
+        resp = self.client.post(f"/api/posts/{post2.id}/retry/")
+        self.assertIn(resp.status_code, (403, 404))
+
+    @patch('tracker.services.verify_token_permissions')
+    @patch('tracker.services.exchange_code_for_token')
+    def test_missing_permissions_rejected(self, mock_exchange, mock_perms):
+        mock_exchange.return_value = {'access_token': 'short_token', 'user_id': '17841'}
+        mock_perms.return_value = (False, ['instagram_business_manage_insights'])
+
+        link = UniqueLink.objects.create(user=self.ig_user1)
+
+        with self.assertRaises(InstagramOAuthError) as ctx:
+            complete_instagram_oauth('code_123', str(link.token))
+
+        self.assertIn("ruxsatlari to'liq berilmagan", str(ctx.exception))
+        self.ig_user1.refresh_from_db()
+        self.assertEqual(self.ig_user1.status, 'needs_reauth')
+
+    @patch('tracker.services.check_instagram_account_type')
+    def test_personal_account_rejected_on_publish(self, mock_acc_type):
+        mock_acc_type.return_value = 'PERSONAL'
+
+        self.ig_user1.status = 'connected'
+        self.ig_user1.access_token = 'token_pers'
+        self.ig_user1.ig_user_id = '17841_pers'
+        self.ig_user1.save()
+
+        link = UniqueLink.objects.create(user=self.ig_user1)
+
+        with self.assertRaises(InstagramPublishError) as ctx:
+            publish_reels_for_link(link.id)
+
+        self.assertIn("shaxsiy (Personal)", str(ctx.exception))
+        post = Post.objects.get(link=link)
+        self.assertEqual(post.status, 'failed')
+        self.assertIn("shaxsiy", post.error)
+
+
