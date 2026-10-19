@@ -304,35 +304,30 @@ class AdaptiveScheduleTestCase(TestCase):
     def test_adaptive_intervals(self):
         base_now = timezone.now()
 
-        # 0 to 24 hours -> 15 minutes
+        # 0 to 6 hours -> 15 minutes
         self.post.posted_at = base_now - timedelta(hours=2)
         next_check = calculate_next_check(self.post, now=base_now)
         self.assertEqual(next_check, base_now + timedelta(minutes=15))
 
-        # 2 days -> 1 hour
-        self.post.posted_at = base_now - timedelta(days=2)
+        # 6 to 24 hours -> 1 hour
+        self.post.posted_at = base_now - timedelta(hours=10)
         next_check = calculate_next_check(self.post, now=base_now)
         self.assertEqual(next_check, base_now + timedelta(hours=1))
 
-        # 5 days -> 4 hours
-        self.post.posted_at = base_now - timedelta(days=5)
+        # 1 to 3 days -> 3 hours
+        self.post.posted_at = base_now - timedelta(days=2)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(hours=4))
+        self.assertEqual(next_check, base_now + timedelta(hours=3))
 
-        # 10 days -> 12 hours
+        # 3 to 30 days -> 24 hours (1 day)
         self.post.posted_at = base_now - timedelta(days=10)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(hours=12))
-
-        # 20 days -> 24 hours
-        self.post.posted_at = base_now - timedelta(days=20)
-        next_check = calculate_next_check(self.post, now=base_now)
         self.assertEqual(next_check, base_now + timedelta(days=1))
 
-        # 35 days -> checks daily to verify post still exists and track milestones
+        # > 30 days -> 7 days
         self.post.posted_at = base_now - timedelta(days=35)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(days=1))
+        self.assertEqual(next_check, base_now + timedelta(days=7))
 
 
 class MetricsAndPrizesTestCase(TestCase):
@@ -922,14 +917,12 @@ class Phase1ModelsTestCase(TestCase):
         self.assertEqual(self.ig_user.role, 'admin')
 
         prize = Prize.objects.create(post=self.post, milestone=1000)
-        notif = Notification.objects.create(
-            user=self.ig_user,
-            kind='prize',
-            message="1000 views to'plandi!",
-            related_prize=prize,
-        )
-        self.assertFalse(notif.is_read)
+        
         self.assertEqual(self.ig_user.notifications.count(), 1)
+        notif = self.ig_user.notifications.first()
+        self.assertEqual(notif.kind, 'prize')
+        self.assertIn("1000", notif.message)
+        self.assertFalse(notif.is_read)
 
 
 class Phase2AuthPermissionsTestCase(TestCase):
@@ -1376,5 +1369,87 @@ class Phase4UserInstagramAndPublishTestCase(TestCase):
         post = Post.objects.get(link=link)
         self.assertEqual(post.status, 'failed')
         self.assertIn("shaxsiy", post.error)
+
+
+class Phase5StatsEngineTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        
+        self.user = User.objects.create_user(username="p5_user", password="pwd")
+        self.ig_user = InstagramUser.objects.create(name="P5 User", user=self.user, status='connected', access_token='token123', ig_user_id='1234')
+        self.link = UniqueLink.objects.create(user=self.ig_user)
+        self.post = Post.objects.create(
+            link=self.link,
+            status='published',
+            ig_media_id='media_p5',
+            posted_at=timezone.now() - timedelta(hours=1),
+            views=100
+        )
+
+    @patch('tracker.services.requests.get')
+    def test_deleted_media_vs_token_error(self, mock_get):
+        # 1. Deleted media (404)
+        mock_resp_404 = MagicMock()
+        mock_resp_404.status_code = 404
+        mock_get.return_value = mock_resp_404
+
+        update_post_metrics(self.post)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.status, 'deleted')
+        self.assertIsNotNone(self.post.deleted_detected_at)
+        self.assertIsNone(self.post.next_check_at)
+
+        # 2. Token error (OAuthException 190)
+        self.post.status = 'published'
+        self.post.save()
+        
+        mock_resp_190 = MagicMock()
+        mock_resp_190.status_code = 400
+        mock_resp_190.json.return_value = {"error": {"code": 190}}
+        mock_get.return_value = mock_resp_190
+
+        update_post_metrics(self.post)
+        self.ig_user.refresh_from_db()
+        self.post.refresh_from_db()
+        self.assertEqual(self.ig_user.status, 'needs_reauth')
+        self.assertEqual(self.post.status, 'published')  # Post status doesn't change to deleted
+        self.assertIn("yaroqsiz", self.post.error)
+        self.assertIsNone(self.post.next_check_at)
+
+    def test_duplicate_prize_prevention_and_signal(self):
+        # 500 ga yetdi
+        self.post.views = 500
+        self.post.save()
+        
+        check_and_award_prizes(self.post)
+        self.assertEqual(Prize.objects.filter(post=self.post, milestone=500).count(), 1)
+        self.assertEqual(Notification.objects.filter(user=self.ig_user, kind='prize').count(), 1)
+
+        # Worker yana bir marta xuddi shu postni ishladi
+        check_and_award_prizes(self.post)
+        self.assertEqual(Prize.objects.filter(post=self.post, milestone=500).count(), 1)
+        # Notification ko'paymaydi
+        self.assertEqual(Notification.objects.filter(user=self.ig_user, kind='prize').count(), 1)
+
+    def test_adaptive_interval_logic(self):
+        now = timezone.now()
+        
+        # 0-6 hours
+        self.post.posted_at = now - timedelta(hours=2)
+        next_check = calculate_next_check(self.post, now=now)
+        self.assertEqual(next_check, now + timedelta(minutes=15))
+        
+        # 6-24 hours
+        self.post.posted_at = now - timedelta(hours=10)
+        next_check = calculate_next_check(self.post, now=now)
+        self.assertEqual(next_check, now + timedelta(hours=1))
+
+        # Milestone 80% logic (500 * 0.8 = 400)
+        self.post.posted_at = now - timedelta(days=2) # 1-3 days usually 3 hours
+        self.post.views = 410
+        next_check = calculate_next_check(self.post, now=now)
+        # Prizga yaqin bo'lgani uchun 15 min
+        self.assertEqual(next_check, now + timedelta(minutes=15))
 
 

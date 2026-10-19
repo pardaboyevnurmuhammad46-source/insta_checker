@@ -1,43 +1,80 @@
 import os
 import django
-import sys
+from django.utils import timezone
+from datetime import timedelta
+import time
+import random
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
-from tracker.models import InstagramUser, UniqueLink
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.conf import settings
+from tracker.models import InstagramUser, UniqueLink, Post, Video
+from tracker.tasks import check_all_due_posts_task
+from django.contrib.auth.models import User
 
-def generate_test_links(count=5):
-    print(f"Generating {count} test users and links...")
+def run():
+    print("Test ma'lumotlarini yaratish boshlandi...")
     
-    # Create a dummy video file if it doesn't exist
-    video_content = b"fake video content for testing"
+    # 1. Tizim uchun yagona default video yaratamiz
+    video, _ = Video.objects.get_or_create(
+        title="Load Test Video",
+        is_default=True,
+        defaults={'file': 'videos/load_test.mp4'}
+    )
     
-    links = []
-    for i in range(count):
-        # 1. Create a User
-        user = InstagramUser.objects.create(
-            name=f"Test User {i+1}",
-            status="pending"
-        )
+    # 2. Bitta foydalanuvchi yaratamiz
+    user, _ = User.objects.get_or_create(username="loadtest_user", defaults={"password": "password"})
+    ig_user, _ = InstagramUser.objects.get_or_create(
+        user=user,
+        defaults={
+            "name": "Load Test",
+            "ig_user_id": "123456789",
+            "access_token": "fake_token",
+            "status": "connected"
+        }
+    )
+    
+    # 3. 10 000 ta "tekshiruv vaqti kelgan" postlarni ommaviy (bulk) yaratamiz
+    total_posts = 10000
+    links_to_create = []
+    
+    # Eskilarini tozalash (agar kerak bo'lsa)
+    print("Eski load test ma'lumotlari tozalanmoqda...")
+    UniqueLink.objects.filter(user=ig_user).delete()
+    
+    print(f"{total_posts} ta UniqueLink yaratilmoqda...")
+    for i in range(total_posts):
+        links_to_create.append(UniqueLink(user=ig_user, video=video, status='posted'))
+    UniqueLink.objects.bulk_create(links_to_create, batch_size=2000)
+    
+    created_links = list(UniqueLink.objects.filter(user=ig_user).values_list('id', flat=True))
+    
+    print(f"{total_posts} ta Post yaratilmoqda...")
+    now = timezone.now()
+    past_due = now - timedelta(minutes=5)
+    posts_to_create = []
+    
+    for i, link_id in enumerate(created_links):
+        posts_to_create.append(Post(
+            link_id=link_id,
+            status='published',
+            ig_media_id=f"media_{i}",
+            permalink=f"https://instagram.com/reel/media_{i}/",
+            posted_at=now - timedelta(days=1),
+            next_check_at=past_due,
+            views=random.randint(100, 400)
+        ))
         
-        # 2. Create a Link
-        video_file = SimpleUploadedFile(f"test_video_{i+1}.mp4", video_content, content_type="video/mp4")
-        link = UniqueLink.objects.create(
-            user=user,
-            video=video_file,
-            status="pending"
-        )
-        
-        full_url = f"{settings.SITE_URL.rstrip('/')}/link/{link.token}/"
-        links.append(full_url)
-        print(f"Created: {full_url}")
-        
-    print("\nTest links generation complete!")
-    print("O'z telefoningiz yoki brauzeringiz orqali yuqoridagi manzillarga kiring va Instagram orqali ruxsat bering.")
+    Post.objects.bulk_create(posts_to_create, batch_size=2000)
+    
+    print("Barcha ma'lumotlar yaratildi. check_all_due_posts_task ishga tushirilmoqda...")
+    
+    start_time = time.time()
+    dispatched = check_all_due_posts_task()
+    end_time = time.time()
+    
+    print(f"Jami yuborilgan postlar: {dispatched}")
+    print(f"Bajarishga ketgan vaqt: {end_time - start_time:.2f} soniya")
 
 if __name__ == '__main__':
-    count = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    generate_test_links(count)
+    run()

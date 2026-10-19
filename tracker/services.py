@@ -11,7 +11,7 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
-from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user
+from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user, PostStat, Notification
 
 logger = logging.getLogger(__name__)
 
@@ -480,12 +480,13 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
 
 def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     """
-    Post yoshiga qarab keyingi tekshirish vaqtini adaptiv hisoblaydi:
-    - 0 .. 24 soat: har 15 daqiqada
-    - 1 .. 3 kun: har 1 soatda
-    - 3 .. 7 kun: har 4 soatda
-    - 7 .. 14 kun: har 12 soatda
-    - 14 kundan so'ng: kuniga 1 marta (24 soat)
+    Post yoshiga va prizga yaqinligiga qarab keyingi tekshirish vaqtini adaptiv hisoblaydi:
+    - 0 .. 6 soat: har 15 daqiqada
+    - 6 .. 24 soat: har 1 soatda
+    - 1 .. 3 kun: har 3 soatda
+    - 3 .. 30 kun: har 24 soatda
+    - 30 kundan keyin: haftada 1 marta (7 kun)
+    Agar views kutilayotgan prizning 80% iga yetgan bo'lsa -> har 15 daqiqada.
     """
     if post.status != 'published' or not post.posted_at:
         return None
@@ -493,20 +494,29 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     if now is None:
         now = timezone.now()
 
-    age = now - post.posted_at
-    if age < timedelta(0):
+    # Prizga yaqinlikni tekshirish
+    milestones = get_configured_milestones()
+    awarded_milestones = list(post.prizes.values_list('milestone', flat=True))
+    next_milestone = None
+    for m in sorted(milestones):
+        if m not in awarded_milestones:
+            next_milestone = m
+            break
+
+    if next_milestone and post.views >= (next_milestone * 0.8):
         return now + timedelta(minutes=15)
 
-    if age < timedelta(hours=24):
+    age = now - post.posted_at
+    if age < timedelta(hours=6):
         return now + timedelta(minutes=15)
-    elif age < timedelta(days=3):
+    elif age < timedelta(hours=24):
         return now + timedelta(hours=1)
-    elif age < timedelta(days=7):
-        return now + timedelta(hours=4)
-    elif age < timedelta(days=14):
-        return now + timedelta(hours=12)
-    else:
+    elif age < timedelta(days=3):
+        return now + timedelta(hours=3)
+    elif age < timedelta(days=30):
         return now + timedelta(days=1)
+    else:
+        return now + timedelta(days=7)
 
 
 def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str) -> dict:
@@ -606,6 +616,14 @@ def update_post_metrics(post: Post) -> Post:
         post.error = None
         post.save(update_fields=['likes', 'comments_count', 'views', 'last_checked_at', 'next_check_at', 'error'])
 
+        # Tarix (PostStat) yozish
+        PostStat.objects.create(
+            post=post,
+            views=post.views,
+            likes=post.likes,
+            comments_count=post.comments_count,
+        )
+
         # Sovrin berish logikasi
         check_and_award_prizes(post)
         return post
@@ -617,8 +635,9 @@ def update_post_metrics(post: Post) -> Post:
         if exc.is_deleted:
             post.status = 'deleted'
             post.next_check_at = None
+            post.deleted_detected_at = timezone.now()
             post.error = "Instagram'dan post o'chirilgan."
-            post.save(update_fields=['status', 'next_check_at', 'error'])
+            post.save(update_fields=['status', 'next_check_at', 'deleted_detected_at', 'error'])
         elif exc.is_auth_error:
             user.status = 'needs_reauth'
             user.save(update_fields=['status'])

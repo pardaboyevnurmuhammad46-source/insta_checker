@@ -50,7 +50,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_filters',
-    'tracker',
+    'tracker.apps.TrackerConfig',
 ]
 
 MIDDLEWARE = [
@@ -237,6 +237,12 @@ PRIZE_MILESTONES = [int(m.strip()) for m in raw_milestones.split(',') if m.strip
 # Video hajmi limiti (standart: 100 MB)
 MAX_VIDEO_SIZE_MB = int(os.getenv('MAX_VIDEO_SIZE_MB', '100'))
 MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
+
+# API Rate Limiting for Celery
+INSTAGRAM_API_RATE_LIMIT = int(os.getenv('INSTAGRAM_API_RATE_LIMIT', '50')) # requests per second
+CHECK_BATCH_SIZE = int(os.getenv('CHECK_BATCH_SIZE', '1000'))
+MAX_POSTS_PER_RUN = int(os.getenv('MAX_POSTS_PER_RUN', '50000'))
+
 
 
 

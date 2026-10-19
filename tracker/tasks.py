@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from .models import InstagramUser, Post
@@ -35,7 +36,7 @@ def publish_reels_task(self, link_id: int, caption: str = ''):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=2, default_retry_delay=60)
+@shared_task(bind=True, max_retries=2, default_retry_delay=60, rate_limit=f"{getattr(settings, 'INSTAGRAM_API_RATE_LIMIT', 50)}/s")
 def check_post_metrics_task(self, post_id: int):
     """
     Bitta post uchun Instagram metrikalarini (views, likes, comments) yangilaydi.
@@ -64,16 +65,12 @@ def check_post_metrics_task(self, post_id: int):
         return {"error": f"Post #{post_id} topilmadi"}
     except InstagramMetricsError as exc:
         logger.warning("Post statistikasini olishda xatolik (post_id=%s): %s", post_id, exc)
-        # if "tarmoq" in str(exc).lower():
-        #     raise self.retry(exc=exc)
         if isinstance(exc, InstagramNetworkError):
             raise self.retry(exc=exc)
         return {"error": str(exc), "status": "failed"}
     except Exception as exc:
         logger.exception("Kutilmagan xatolik post statistikasini tekshirishda (post_id=%s): %s", post_id, exc)
         raise self.retry(exc=exc)
-
-
 
 
 @shared_task
@@ -84,8 +81,8 @@ def check_all_due_posts_task():
     """
     now = timezone.now()
     total_dispatched = 0
-    max_to_dispatch_per_run = 50000  # Har ishga tushganda maksimal 50,000 ta postni tekshiruvga yuborish
-    batch_size = 1000
+    max_to_dispatch_per_run = getattr(settings, 'MAX_POSTS_PER_RUN', 50000)
+    batch_size = getattr(settings, 'CHECK_BATCH_SIZE', 1000)
     
     while total_dispatched < max_to_dispatch_per_run:
         with transaction.atomic():
