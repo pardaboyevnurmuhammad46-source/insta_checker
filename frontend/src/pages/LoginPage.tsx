@@ -21,9 +21,15 @@ export const LoginPage: React.FC = () => {
 
     try {
       setLoading(true);
-      await login(username, password);
+      // await login(username, password);
+      // navigate('/');
+      const profile = await login(username, password);
       showToast('Muvaffaqiyatli kirdingiz!', 'success');
-      navigate('/');
+      if (profile.role === 'admin') {
+        navigate('/admin-panel');
+      } else {
+        navigate('/app');
+      }
     } catch (err: any) {
       if (err.response?.status === 429) {
         showToast('Juda koʻp urinishlar qilindi. 1 daqiqadan soʻng qayta urining.', 'error');
@@ -40,8 +46,10 @@ export const LoginPage: React.FC = () => {
       <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-700">
         <div className="text-center mb-8">
           <div className="text-4xl mb-2">📸</div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">InstaChecker Admin</h1>
-          <p className="text-slate-400 text-sm mt-1">Boshqaruv paneliga kirish</p>
+          {/* <h1 className="text-2xl font-bold text-white tracking-tight">InstaChecker Admin</h1> */}
+          {/* <p className="text-slate-400 text-sm mt-1">Boshqaruv paneliga kirish</p> */}
+          <h1 className="text-2xl font-bold text-white tracking-tight">InstaChecker</h1>
+          <p className="text-slate-400 text-sm mt-1">Tizimga kirish (Admin va Foydalanuvchi)</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
