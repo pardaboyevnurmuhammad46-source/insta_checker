@@ -1,24 +1,42 @@
+import logging
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.http import HttpResponseRedirect
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.db.models import Count, Sum
 from datetime import timedelta
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, action, permission_classes
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+from .permissions import IsAdminRole, IsOwnerOrAdmin
+# from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+from .models import (
+    InstagramUser,
+    UniqueLink,
+    Post,
+    Prize,
+    DataDeletionRequest,
+    Video,
+    PostStat,
+    Notification,
+)
 from .serializers import (
     InstagramUserSerializer,
     UniqueLinkSerializer,
     PostSerializer,
     PrizeSerializer,
     DataDeletionRequestSerializer,
+    PostStatSerializer,
+    NotificationSerializer,
+    AdminCreateUserSerializer,
+    ChangePasswordSerializer,
+    ResetPasswordSerializer,
 )
 from .services import (
     InstagramOAuthError,
@@ -32,6 +50,8 @@ from .services import (
 )
 from .tasks import publish_reels_task, check_post_metrics_task
 
+logger = logging.getLogger(__name__)
+
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 50
@@ -44,6 +64,7 @@ class InstagramUserViewSet(viewsets.ModelViewSet):
     queryset = InstagramUser.objects.all().order_by("-id")
     serializer_class = InstagramUserSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [IsAdminRole]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['name', 'ig_user_id']
@@ -62,18 +83,48 @@ class InstagramUserViewSet(viewsets.ModelViewSet):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    @action(detail=False, methods=['post'], url_path='create-user', permission_classes=[IsAdminRole])
+    def create_user(self, request):
+        serializer = AdminCreateUserSerializer(data=request.data)
+        if serializer.is_valid():
+            result = serializer.save()
+            return Response(result, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='reset-password', permission_classes=[IsAdminRole])
+    def reset_password(self, request, pk=None):
+        ig_user = self.get_object()
+        if not ig_user.user:
+            return Response({"error": "Ushbu Instagram foydalanuvchisi Django User ga ulanmagan."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = ResetPasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        new_password = serializer.validated_data['new_password']
+        ig_user.user.set_password(new_password)
+        ig_user.user.save()
+        return Response({"message": f"Foydalanuvchi ({ig_user.user.username}) paroli muvaffaqiyatli tiklandi."})
+
 
 class UniqueLinkViewSet(viewsets.ModelViewSet):
     # queryset = UniqueLink.objects.select_related('user').all()
     queryset = UniqueLink.objects.select_related('user').all().order_by('-id')
     serializer_class = UniqueLinkSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [IsOwnerOrAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'user']
     search_fields = ['user__name']
     # ordering_fields = ['created_at']
     ordering_fields = ['created_at', 'id']
     ordering = ['-id']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return UniqueLink.objects.none()
+        if user.is_staff or user.is_superuser:
+            return UniqueLink.objects.select_related('user').all().order_by('-id')
+        return UniqueLink.objects.select_related('user').filter(user__user=user).order_by('-id')
 
     @action(detail=True, methods=['post'], url_path='resend')
     def resend(self, request, pk=None):
@@ -92,6 +143,7 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Post.objects.select_related('link__user').all().order_by('-id')
     serializer_class = PostSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [IsOwnerOrAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'link__user']
     search_fields = ['link__user__name', 'ig_media_id']
@@ -99,12 +151,26 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['views', 'posted_at', 'id']
     ordering = ['-id']
 
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Post.objects.none()
+        if user.is_staff or user.is_superuser:
+            return Post.objects.select_related('link__user').all().order_by('-id')
+        return Post.objects.select_related('link__user').filter(link__user__user=user).order_by('-id')
+
+    @action(detail=True, methods=['get'], url_path='stats')
+    def stats(self, request, pk=None):
+        post = self.get_object()
+        stats_qs = post.stats.all().order_by('-checked_at')
+        return Response(PostStatSerializer(stats_qs, many=True).data)
+
     @action(detail=True, methods=['post'], url_path='check-metrics')
     def check_metrics(self, request, pk=None):
         post = self.get_object()
         task = check_post_metrics_task.delay(post.id)
         return Response({"message": "Post statistikasini tekshirish vazifasi navbatga qo'yildi.", "task_id": task.id})
-        
+
     @action(detail=True, methods=['post'], url_path='retry')
     def retry(self, request, pk=None):
         post = self.get_object()
@@ -117,15 +183,63 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
         return Response({"message": "Post qayta joylash uchun navbatga qo'yildi."})
 
 
+class PostStatViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = PostStat.objects.select_related('post__link__user').all().order_by('-checked_at')
+    serializer_class = PostStatSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [IsOwnerOrAdmin]
+    ordering = ['-checked_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return PostStat.objects.none()
+        if user.is_staff or user.is_superuser:
+            return PostStat.objects.select_related('post__link__user').all().order_by('-checked_at')
+        return PostStat.objects.select_related('post__link__user').filter(post__link__user__user=user).order_by('-checked_at')
+
+
 class PrizeViewSet(viewsets.ReadOnlyModelViewSet):
     # queryset = Prize.objects.select_related('post__link__user').all()
     queryset = Prize.objects.select_related('post__link__user').all().order_by('-id')
     serializer_class = PrizeSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [IsOwnerOrAdmin]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     # ordering_fields = ['sent_at', 'milestone']
     ordering_fields = ['sent_at', 'milestone', 'id']
     ordering = ['-id']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Prize.objects.none()
+        if user.is_staff or user.is_superuser:
+            return Prize.objects.select_related('post__link__user').all().order_by('-id')
+        return Prize.objects.select_related('post__link__user').filter(post__link__user__user=user).order_by('-id')
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Notification.objects.select_related('user').all().order_by('-created_at')
+    serializer_class = NotificationSerializer
+    pagination_class = StandardResultsSetPagination
+    permission_classes = [IsOwnerOrAdmin]
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Notification.objects.none()
+        if user.is_staff or user.is_superuser:
+            return Notification.objects.select_related('user').all().order_by('-created_at')
+        return Notification.objects.select_related('user').filter(user__user=user).order_by('-created_at')
+
+    @action(detail=True, methods=['post'], url_path='mark-read')
+    def mark_read(self, request, pk=None):
+        notification = self.get_object()
+        notification.is_read = True
+        notification.save(update_fields=['is_read'])
+        return Response({"message": "Bildirishnoma o'qildi deb belgilandi."})
 
 
 class DataDeletionRequestViewSet(viewsets.ReadOnlyModelViewSet):
@@ -133,31 +247,33 @@ class DataDeletionRequestViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DataDeletionRequest.objects.all().order_by('-requested_at')
     serializer_class = DataDeletionRequestSerializer
     pagination_class = StandardResultsSetPagination
+    permission_classes = [IsAdminRole]
     ordering = ['-requested_at']
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+# @permission_classes([IsAdminUser])
+@permission_classes([IsAdminRole])
 def dashboard_stats(request):
     users_by_status = InstagramUser.objects.values('status').annotate(count=Count('id'))
     links_by_status = UniqueLink.objects.values('status').annotate(count=Count('id'))
     posts_by_status = Post.objects.values('status').annotate(count=Count('id'))
-    
+
     total_metrics = Post.objects.aggregate(
         total_views=Sum('views'),
         total_likes=Sum('likes'),
         total_comments=Sum('comments_count')
     )
-    
+
     total_prizes = Prize.objects.count()
-    
+
     seven_days_from_now = timezone.now() + timedelta(days=7)
     expiring_tokens_count = InstagramUser.objects.filter(
         token_expires_at__isnull=False,
         token_expires_at__lte=seven_days_from_now,
         status='connected'
     ).count()
-    
+
     return Response({
         "users_by_status": {item['status']: item['count'] for item in users_by_status},
         "links_by_status": {item['status']: item['count'] for item in links_by_status},
@@ -169,6 +285,76 @@ def dashboard_stats(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def current_user_profile(request):
+    """
+    Joriy tizimga kirgan foydalanuvchi ma'lumotlari va roli (/api/me/).
+    """
+    user = request.user
+    role = "admin" if (user.is_staff or user.is_superuser) else "user"
+    ig_profile = getattr(user, 'instagram_user', None)
+    return Response({
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "is_staff": user.is_staff,
+        "role": role,
+        "instagram_user": InstagramUserSerializer(ig_profile).data if ig_profile else None
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminRole])
+def admin_create_user(request):
+    """
+    Faqat admin uchun: Yangi foydalanuvchi (Django User + InstagramUser) yaratish.
+    """
+    serializer = AdminCreateUserSerializer(data=request.data)
+    if serializer.is_valid():
+        result = serializer.save()
+        return Response(result, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Oddiy user yoki admin o'z parolini eski parolni kiritish orqali yangilaydi.
+    """
+    serializer = ChangePasswordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    old_password = serializer.validated_data['old_password']
+    new_password = serializer.validated_data['new_password']
+    if not request.user.check_password(old_password):
+        return Response({"error": "Eski parol noto'g'ri kiritildi."}, status=status.HTTP_400_BAD_REQUEST)
+    request.user.set_password(new_password)
+    request.user.save()
+    return Response({"message": "Parol muvaffaqiyatli o'zgartirildi."})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminRole])
+def admin_reset_password(request):
+    """
+    Faqat admin uchun: istalgan userning parolini tiklash.
+    """
+    serializer = ResetPasswordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    user_id = serializer.validated_data.get('user_id')
+    new_password = serializer.validated_data['new_password']
+    try:
+        target_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return Response({"error": "Foydalanuvchi topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+    target_user.set_password(new_password)
+    target_user.save()
+    return Response({"message": f"Foydalanuvchi ({target_user.username}) paroli muvaffaqiyatli tiklandi."})
+
+
+@api_view(['GET'])
 @permission_classes([AllowAny])
 def link_info(request):
     return Response({
@@ -176,8 +362,6 @@ def link_info(request):
         "example": "Admin paneldan yangi UniqueLink yarating va linkka kiring."
     })
 
-
-from django.shortcuts import render
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -261,7 +445,7 @@ def instagram_callback(request):
             'title': 'Link ishlatilgan',
             'message': 'Bu link orqali allaqachon amal bajarilgan.'
         }, status=status.HTTP_400_BAD_REQUEST)
-        
+
     if link_obj.expires_at and timezone.now() > link_obj.expires_at:
         return render(request, 'tracker/status.html', {
             'is_success': False,
@@ -273,8 +457,7 @@ def instagram_callback(request):
     try:
         user, link = complete_instagram_oauth(code=code, token=state)
     except InstagramOAuthError as exc:
-        import logging
-        logging.getLogger(__name__).error(f"InstagramOAuthError: {exc}")
+        logger.error(f"InstagramOAuthError: {exc}")
         UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
         return render(request, 'tracker/status.html', {
             'is_success': False,
@@ -314,6 +497,7 @@ def user_portal(request, token):
 def user_portal_api(request, token):
     link = get_object_or_404(UniqueLink, token=token)
     post = getattr(link, 'post', None)
+
     if not post:
         return Response({"status": "pending"}, status=status.HTTP_200_OK)
 
@@ -323,8 +507,9 @@ def user_portal_api(request, token):
         "views": post.views,
         "likes": post.likes,
         "comments_count": post.comments_count,
-        "posted_at": post.posted_at.isoformat() if post.posted_at else None,
-    }, status=status.HTTP_200_OK)
+        "posted_at": post.posted_at,
+        # "last_checked_at": post.last_checked_at,
+    })
 
 
 @api_view(['POST'])
@@ -383,24 +568,21 @@ def instagram_data_deletion(request):
 
     return Response({
         "url": status_url,
-        "confirmation_code": confirmation_code,
+        "confirmation_code": confirmation_code
     }, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def data_deletion_status(request, confirmation_code):
-    """
-    Foydalanuvchi o'z ma'lumotlari o'chirilganligini tekshirishi mumkin bo'lgan sahifa / API.
-    """
     record = get_object_or_404(DataDeletionRequest, confirmation_code=confirmation_code)
 
     if record.status == 'completed':
-        message = "Instagram hisobingizga oid saqlangan ma'lumotlar to'liq o'chirildi."
-    elif record.status == 'failed':
-        message = "Ma'lumotlarni o'chirish jarayonida xatolik yuz berdi. Iltimos qayta murojaat qiling."
+        message = "Sizning barcha ma'lumotlaringiz tizimdan to'liq o'chirildi."
+    elif record.status == 'pending':
+        message = "Ma'lumotlarni o'chirish so'rovi qabul qilindi va navbatda turibdi."
     else:
-        message = "Ma'lumotlarni o'chirish so'rovi qabul qilindi va ko'rib chiqilmoqda."
+        message = "Ma'lumotlarni o'chirishda xatolik yuz berdi. Iltimos qayta murojaat qiling."
 
     return Response({
         "confirmation_code": record.confirmation_code,

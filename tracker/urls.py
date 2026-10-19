@@ -5,6 +5,8 @@ from .views import (
     UniqueLinkViewSet,
     PostViewSet,
     PrizeViewSet,
+    PostStatViewSet,
+    NotificationViewSet,
     DataDeletionRequestViewSet,
     redirect_to_instagram,
     instagram_callback,
@@ -15,6 +17,10 @@ from .views import (
     dashboard_stats,
     user_portal,
     user_portal_api,
+    current_user_profile,
+    admin_create_user,
+    admin_reset_password,
+    change_password,
 )
 
 router = DefaultRouter()
@@ -22,9 +28,15 @@ router.register(r'users', InstagramUserViewSet)
 router.register(r'links', UniqueLinkViewSet)
 router.register(r'posts', PostViewSet)
 router.register(r'prizes', PrizeViewSet)
+router.register(r'post-stats', PostStatViewSet)
+router.register(r'notifications', NotificationViewSet)
 router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
+    path('api/me/', current_user_profile, name='current_user_profile'),
+    path('api/admin/create-user/', admin_create_user, name='admin_create_user'),
+    path('api/admin/reset-password/', admin_reset_password, name='admin_reset_password'),
+    path('api/change-password/', change_password, name='change_password'),
     path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
     path('api/public/post/<uuid:token>/', user_portal_api, name='user_portal_api'),
     path('api/', include(router.urls)),

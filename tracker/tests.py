@@ -931,3 +931,162 @@ class Phase1ModelsTestCase(TestCase):
         self.assertFalse(notif.is_read)
         self.assertEqual(self.ig_user.notifications.count(), 1)
 
+
+class Phase2AuthPermissionsTestCase(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = APIClient()
+
+        # Admin user
+        self.admin = User.objects.create_superuser(username="admin_p2", password="admin_password")
+        self.ig_admin = InstagramUser.objects.create(name="Admin Profile", user=self.admin)
+
+        # User A
+        self.user_a = User.objects.create_user(username="user_a", password="password_a")
+        self.ig_user_a = InstagramUser.objects.create(name="User A Profile", user=self.user_a)
+        dummy_a = SimpleUploadedFile("a.mp4", b"video_a", content_type="video/mp4")
+        self.link_a = UniqueLink.objects.create(user=self.ig_user_a, video=dummy_a)
+        self.post_a = Post.objects.create(link=self.link_a, status='published', views=10)
+        self.stat_a = PostStat.objects.create(post=self.post_a, views=10)
+        self.prize_a = Prize.objects.create(post=self.post_a, milestone=500)
+
+        # User B
+        self.user_b = User.objects.create_user(username="user_b", password="password_b")
+        self.ig_user_b = InstagramUser.objects.create(name="User B Profile", user=self.user_b)
+        dummy_b = SimpleUploadedFile("b.mp4", b"video_b", content_type="video/mp4")
+        self.link_b = UniqueLink.objects.create(user=self.ig_user_b, video=dummy_b)
+        self.post_b = Post.objects.create(link=self.link_b, status='published', views=20)
+        self.stat_b = PostStat.objects.create(post=self.post_b, views=20)
+        self.prize_b = Prize.objects.create(post=self.post_b, milestone=500)
+
+    def test_anonymous_access_forbidden(self):
+        # (c) tokensiz hamma yopiq
+        self.assertEqual(self.client.get("/api/me/").status_code, 401)
+        self.assertEqual(self.client.get("/api/posts/").status_code, 401)
+        self.assertEqual(self.client.get("/api/links/").status_code, 401)
+        self.assertEqual(self.client.get("/api/users/").status_code, 401)
+        self.assertEqual(self.client.get("/api/dashboard/").status_code, 401)
+
+    def test_regular_user_cannot_access_other_user_data(self):
+        # (a) oddiy user boshqa userning postini/statistikasini ID bilan so'rasa 404 yoki 403 oladi
+        self.client.force_authenticate(user=self.user_a)
+
+        # User A o'z postini ko'ra oladi
+        resp_own = self.client.get(f"/api/posts/{self.post_a.id}/")
+        self.assertEqual(resp_own.status_code, 200)
+
+        # User A User B ning postini ID bilan so'rasa 404 oladi
+        resp_other_post = self.client.get(f"/api/posts/{self.post_b.id}/")
+        self.assertIn(resp_other_post.status_code, (403, 404))
+
+        # User A User B ning post statistikasini so'rasa 404/403 oladi
+        resp_other_stats = self.client.get(f"/api/posts/{self.post_b.id}/stats/")
+        self.assertIn(resp_other_stats.status_code, (403, 404))
+
+        # User A User B ning linkini so'rasa 404/403 oladi
+        resp_other_link = self.client.get(f"/api/links/{self.link_b.id}/")
+        self.assertIn(resp_other_link.status_code, (403, 404))
+
+        # User A User B ning prizini so'rasa 404/403 oladi
+        resp_other_prize = self.client.get(f"/api/prizes/{self.prize_b.id}/")
+        self.assertIn(resp_other_prize.status_code, (403, 404))
+
+    def test_regular_user_cannot_access_admin_endpoints(self):
+        # (b) oddiy user admin endpointiga kira olmaydi
+        self.client.force_authenticate(user=self.user_a)
+
+        self.assertEqual(self.client.get("/api/dashboard/").status_code, 403)
+        self.assertEqual(self.client.get("/api/users/").status_code, 403)
+        self.assertEqual(self.client.post("/api/admin/create-user/", {}).status_code, 403)
+        self.assertEqual(self.client.post("/api/admin/reset-password/", {}).status_code, 403)
+
+    def test_admin_can_access_all_data(self):
+        # (d) admin hammasini ko'radi
+        self.client.force_authenticate(user=self.admin)
+
+        resp_posts = self.client.get("/api/posts/")
+        self.assertEqual(resp_posts.status_code, 200)
+        post_ids = [p['id'] for p in resp_posts.json()['results']]
+        self.assertIn(self.post_a.id, post_ids)
+        self.assertIn(self.post_b.id, post_ids)
+
+        self.assertEqual(self.client.get(f"/api/posts/{self.post_a.id}/").status_code, 200)
+        self.assertEqual(self.client.get(f"/api/posts/{self.post_b.id}/").status_code, 200)
+        self.assertEqual(self.client.get("/api/dashboard/").status_code, 200)
+        self.assertEqual(self.client.get("/api/users/").status_code, 200)
+
+    def test_jwt_login_role_and_me_endpoint(self):
+        # Admin login
+        resp_admin = self.client.post("/api/token/", {"username": "admin_p2", "password": "admin_password"})
+        self.assertEqual(resp_admin.status_code, 200)
+        self.assertEqual(resp_admin.json().get('role'), "admin")
+
+        # User login
+        resp_user = self.client.post("/api/token/", {"username": "user_a", "password": "password_a"})
+        self.assertEqual(resp_user.status_code, 200)
+        self.assertEqual(resp_user.json().get('role'), "user")
+
+        # /api/me/ tekshirish
+        token_a = resp_user.json()['access']
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_a}")
+        resp_me = self.client.get("/api/me/")
+        self.assertEqual(resp_me.status_code, 200)
+        data_me = resp_me.json()
+        self.assertEqual(data_me['username'], "user_a")
+        self.assertEqual(data_me['role'], "user")
+        self.assertFalse(data_me['is_staff'])
+        self.assertIsNotNone(data_me['instagram_user'])
+
+    def test_admin_create_user_and_password_lifecycle(self):
+        self.client.force_authenticate(user=self.admin)
+
+        # 1. Admin yangi foydalanuvchi yaratadi
+        payload = {
+            "username": "client_99",
+            "password": "initial_password_123",
+            "name": "Mijoz 99",
+            "is_staff": False,
+        }
+        resp = self.client.post("/api/admin/create-user/", payload)
+        self.assertEqual(resp.status_code, 201)
+        created_data = resp.json()
+        self.assertEqual(created_data['username'], "client_99")
+        self.assertEqual(created_data['role'], "user")
+        self.assertNotIn("password", created_data)
+        self.assertNotIn("initial_password_123", json.dumps(created_data))
+
+        # Yaratilgan user login qila oladi
+        client_auth = APIClient()
+        resp_login = client_auth.post("/api/token/", {"username": "client_99", "password": "initial_password_123"})
+        self.assertEqual(resp_login.status_code, 200)
+        token = resp_login.json()['access']
+        client_auth.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        # 2. User o'z parolini o'zgartiradi
+        bad_change = client_auth.post("/api/change-password/", {
+            "old_password": "wrong_password",
+            "new_password": "new_password_456"
+        })
+        self.assertEqual(bad_change.status_code, 400)
+
+        good_change = client_auth.post("/api/change-password/", {
+            "old_password": "initial_password_123",
+            "new_password": "new_password_456"
+        })
+        self.assertEqual(good_change.status_code, 200)
+
+        resp_new_login = client_auth.post("/api/token/", {"username": "client_99", "password": "new_password_456"})
+        self.assertEqual(resp_new_login.status_code, 200)
+
+        # 3. Admin parolni tiklaydi
+        user_obj = User.objects.get(username="client_99")
+        resp_reset = self.client.post("/api/admin/reset-password/", {
+            "user_id": user_obj.id,
+            "new_password": "admin_reset_789"
+        })
+        self.assertEqual(resp_reset.status_code, 200)
+
+        resp_reset_login = client_auth.post("/api/token/", {"username": "client_99", "password": "admin_reset_789"})
+        self.assertEqual(resp_reset_login.status_code, 200)
+
