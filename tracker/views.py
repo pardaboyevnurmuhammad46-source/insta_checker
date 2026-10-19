@@ -40,13 +40,16 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 class InstagramUserViewSet(viewsets.ModelViewSet):
+    # queryset = InstagramUser.objects.all().order_by("-id")
     queryset = InstagramUser.objects.all().order_by("-id")
     serializer_class = InstagramUserSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['name', 'ig_user_id']
-    ordering_fields = ['created_at']
+    # ordering_fields = ['created_at']
+    ordering_fields = ['created_at', 'id']
+    ordering = ['-id']
 
     @action(detail=True, methods=['post'], url_path='refresh-token')
     def refresh_token(self, request, pk=None):
@@ -61,13 +64,16 @@ class InstagramUserViewSet(viewsets.ModelViewSet):
 
 
 class UniqueLinkViewSet(viewsets.ModelViewSet):
-    queryset = UniqueLink.objects.select_related('user').all()
+    # queryset = UniqueLink.objects.select_related('user').all()
+    queryset = UniqueLink.objects.select_related('user').all().order_by('-id')
     serializer_class = UniqueLinkSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'user']
     search_fields = ['user__name']
-    ordering_fields = ['created_at']
+    # ordering_fields = ['created_at']
+    ordering_fields = ['created_at', 'id']
+    ordering = ['-id']
 
     @action(detail=True, methods=['post'], url_path='resend')
     def resend(self, request, pk=None):
@@ -82,13 +88,16 @@ class UniqueLinkViewSet(viewsets.ModelViewSet):
 
 
 class PostViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Post.objects.select_related('link__user').all()
+    # queryset = Post.objects.select_related('link__user').all()
+    queryset = Post.objects.select_related('link__user').all().order_by('-id')
     serializer_class = PostSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'link__user']
     search_fields = ['link__user__name', 'ig_media_id']
-    ordering_fields = ['views', 'posted_at']
+    # ordering_fields = ['views', 'posted_at']
+    ordering_fields = ['views', 'posted_at', 'id']
+    ordering = ['-id']
 
     @action(detail=True, methods=['post'], url_path='check-metrics')
     def check_metrics(self, request, pk=None):
@@ -109,17 +118,22 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class PrizeViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Prize.objects.select_related('post__link__user').all()
+    # queryset = Prize.objects.select_related('post__link__user').all()
+    queryset = Prize.objects.select_related('post__link__user').all().order_by('-id')
     serializer_class = PrizeSerializer
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    ordering_fields = ['sent_at', 'milestone']
+    # ordering_fields = ['sent_at', 'milestone']
+    ordering_fields = ['sent_at', 'milestone', 'id']
+    ordering = ['-id']
 
 
 class DataDeletionRequestViewSet(viewsets.ReadOnlyModelViewSet):
+    # queryset = DataDeletionRequest.objects.all().order_by('-requested_at')
     queryset = DataDeletionRequest.objects.all().order_by('-requested_at')
     serializer_class = DataDeletionRequestSerializer
     pagination_class = StandardResultsSetPagination
+    ordering = ['-requested_at']
 
 
 @api_view(['GET'])
@@ -205,9 +219,10 @@ def redirect_to_instagram(request, token):
             'description': f'Aslida quyidagi manzilga o\'tilishi kerak edi: {auth_url}'
         })
 
-    return render(request, 'tracker/landing.html', {
-        'auth_url': auth_url
-    })
+    # return render(request, 'tracker/landing.html', {
+    #     'auth_url': auth_url
+    # })
+    return HttpResponseRedirect(auth_url)
 
 
 @api_view(['GET'])

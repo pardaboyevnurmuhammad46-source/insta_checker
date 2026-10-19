@@ -1,9 +1,11 @@
 import axios from 'axios';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+// export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+export const API_BASE_URL = '';
 
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
+  // baseURL: API_BASE_URL,
+  baseURL: '',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -72,7 +74,8 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const response = await axios.post(`${API_BASE_URL}/api/token/refresh/`, {
+        // const response = await axios.post(`${API_BASE_URL}/api/token/refresh/`, {
+        const response = await axios.post(`/api/token/refresh/`, {
           refresh: refreshToken,
         });
         const newAccessToken = response.data.access;

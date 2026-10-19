@@ -30,7 +30,11 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-x@#7n8#)tg=ae&+-7nslu1zfna
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 't', 'yes')
 
+# ALLOWED_HOSTS = [host.strip() for host in os.getenv('ALLOWED_HOSTS', '*').split(',') if host.strip()]
 ALLOWED_HOSTS = [host.strip() for host in os.getenv('ALLOWED_HOSTS', '*').split(',') if host.strip()]
+for default_host in ['localhost', '127.0.0.1', 'web']:
+    if '*' not in ALLOWED_HOSTS and default_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(default_host)
 
 
 # Application definition
@@ -136,8 +140,16 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # CSRF Trusted Origins
+# raw_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000,http://localhost,http://127.0.0.1')
+# CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf.split(',') if origin.strip()]
+# site_url = os.getenv('SITE_URL')
+# if site_url and site_url not in CSRF_TRUSTED_ORIGINS:
+#     CSRF_TRUSTED_ORIGINS.append(site_url)
 raw_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000,http://localhost,http://127.0.0.1')
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf.split(',') if origin.strip()]
+for default_origin in ['http://localhost:8080', 'http://127.0.0.1:8080']:
+    if default_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(default_origin)
 site_url = os.getenv('SITE_URL')
 if site_url and site_url not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(site_url)

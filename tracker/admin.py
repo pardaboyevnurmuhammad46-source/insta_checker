@@ -1,5 +1,15 @@
 from django.contrib import admin
-from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+# from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+from .models import (
+    InstagramUser,
+    UniqueLink,
+    Post,
+    Prize,
+    DataDeletionRequest,
+    Video,
+    PostStat,
+    Notification,
+)
 from .tasks import publish_reels_task, check_post_metrics_task
 from .services import refresh_user_token
 
@@ -20,9 +30,17 @@ class InstagramUserAdmin(admin.ModelAdmin):
         self.message_user(request, f"{success_count}/{queryset.count()} ta foydalanuvchi tokeni yangilandi.")
 
 
+@admin.register(Video)
+class VideoAdmin(admin.ModelAdmin):
+    list_display = ('id', 'title', 'owner', 'is_default', 'is_active', 'created_at')
+    list_filter = ('is_default', 'is_active', 'created_at')
+    search_fields = ('title', 'owner__name')
+
+
 @admin.register(UniqueLink)
 class UniqueLinkAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'full_link', 'status', 'expires_at', 'created_at')
+    # list_display = ('id', 'user', 'full_link', 'status', 'expires_at', 'created_at')
+    list_display = ('id', 'user', 'video', 'full_link', 'status', 'expires_at', 'created_at')
     list_filter = ('status', 'created_at')
     search_fields = ('user__name', 'token')
     readonly_fields = ('token', 'created_at')
@@ -65,11 +83,25 @@ class PostAdmin(admin.ModelAdmin):
         self.message_user(request, f"{count} ta post statistikasi tekshirish navbatiga qo'yildi.")
 
 
+@admin.register(PostStat)
+class PostStatAdmin(admin.ModelAdmin):
+    list_display = ('id', 'post', 'views', 'likes', 'comments_count', 'checked_at')
+    list_filter = ('checked_at',)
+    search_fields = ('post__id', 'post__ig_media_id')
+
+
 @admin.register(Prize)
 class PrizeAdmin(admin.ModelAdmin):
     list_display = ('id', 'post', 'milestone', 'sent_at')
     list_filter = ('milestone', 'sent_at')
     search_fields = ('post__id', 'milestone')
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'kind', 'is_read', 'created_at')
+    list_filter = ('kind', 'is_read', 'created_at')
+    search_fields = ('user__name', 'message')
 
 
 @admin.register(DataDeletionRequest)

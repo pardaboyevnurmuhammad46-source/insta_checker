@@ -14,7 +14,18 @@ from django.utils import timezone
 from django.contrib.admin.sites import AdminSite
 from rest_framework.test import APIClient
 
-from tracker.models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+# from tracker.models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
+from tracker.models import (
+    InstagramUser,
+    UniqueLink,
+    Post,
+    Prize,
+    DataDeletionRequest,
+    Video,
+    PostStat,
+    Notification,
+    get_video_for_user,
+)
 from tracker.admin import UniqueLinkAdmin, PostAdmin, InstagramUserAdmin
 from tracker.services import (
     InstagramOAuthError,
@@ -122,8 +133,10 @@ class InstagramOAuthTestCase(TestCase):
     @override_settings(INSTAGRAM_APP_ID='test_app_id', INSTAGRAM_APP_SECRET='test_secret')
     def test_redirect_to_instagram_success(self):
         response = self.client.get(f"/link/{self.link.token}/")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "www.instagram.com/oauth/authorize")
+        # self.assertEqual(response.status_code, 200)
+        # self.assertContains(response, "www.instagram.com/oauth/authorize")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("www.instagram.com/oauth/authorize", response.headers['Location'])
 
         self.link.refresh_from_db()
         self.assertEqual(self.link.status, 'opened')
@@ -847,3 +860,74 @@ class UserPortalAndPublicEndpointsTestCase(TestCase):
 
         resp_405 = self.client.post(f"/oauth/data-deletion/status/{req_pending.confirmation_code}/")
         self.assertEqual(resp_405.status_code, 405)
+
+
+class Phase1ModelsTestCase(TestCase):
+    def setUp(self):
+        self.django_user = User.objects.create_user(username="test_auth_user", password="pwd")
+        self.ig_user = InstagramUser.objects.create(name="Phase1 User", user=self.django_user)
+        self.dummy_file = SimpleUploadedFile("v1.mp4", b"video", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.ig_user, video=self.dummy_file)
+        self.post = Post.objects.create(link=self.link, status='published')
+
+    def test_video_selection_rules(self):
+        other_user = InstagramUser.objects.create(name="User Without Personal Video")
+
+        # 1. Umumiy default video yaratish
+        f1 = SimpleUploadedFile("def.mp4", b"default", content_type="video/mp4")
+        v_default = Video.objects.create(title="General Promo", file=f1, is_default=True)
+
+        # other_user da shaxsiy video yo'q -> default video olinadi
+        chosen = get_video_for_user(other_user)
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, v_default.id)
+
+        # 2. other_user ga shaxsiy faol video yaratilsa -> shaxsiy video olinadi
+        f2 = SimpleUploadedFile("personal.mp4", b"personal", content_type="video/mp4")
+        v_personal = Video.objects.create(title="Personal Promo", file=f2, owner=other_user, is_active=True)
+
+        chosen = get_video_for_user(other_user)
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, v_personal.id)
+
+        # 3. Yangi default video yaratilsa, eskisidan is_default olib tashlanadi
+        f3 = SimpleUploadedFile("def2.mp4", b"default2", content_type="video/mp4")
+        v_default2 = Video.objects.create(title="General Promo 2", file=f3, is_default=True)
+        v_default.refresh_from_db()
+        self.assertFalse(v_default.is_default)
+        self.assertTrue(v_default2.is_default)
+
+    def test_prize_unique_together_constraint(self):
+        Prize.objects.create(post=self.post, milestone=500)
+        with self.assertRaises(IntegrityError):
+            Prize.objects.create(post=self.post, milestone=500)
+
+    def test_post_stat_history(self):
+        stat1 = PostStat.objects.create(post=self.post, views=100, likes=5, comments_count=1)
+        stat2 = PostStat.objects.create(post=self.post, views=250, likes=12, comments_count=3)
+
+        self.assertEqual(self.post.stats.count(), 2)
+        stats = list(self.post.stats.all())
+        self.assertEqual(stats[0].id, stat2.id)
+        self.assertEqual(stats[1].id, stat1.id)
+
+    def test_django_user_role_and_notification(self):
+        self.assertFalse(self.ig_user.is_admin)
+        self.assertEqual(self.ig_user.role, 'user')
+
+        self.django_user.is_staff = True
+        self.django_user.save()
+        self.ig_user.refresh_from_db()
+        self.assertTrue(self.ig_user.is_admin)
+        self.assertEqual(self.ig_user.role, 'admin')
+
+        prize = Prize.objects.create(post=self.post, milestone=1000)
+        notif = Notification.objects.create(
+            user=self.ig_user,
+            kind='prize',
+            message="1000 views to'plandi!",
+            related_prize=prize,
+        )
+        self.assertFalse(notif.is_read)
+        self.assertEqual(self.ig_user.notifications.count(), 1)
+
