@@ -200,9 +200,11 @@ SIMPLE_JWT = {
 cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
 
-# Instagram OAuth
-INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID', '')
-INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET', '')
+# Instagram / Meta OAuth
+INSTAGRAM_APP_ID = os.getenv('INSTAGRAM_APP_ID', os.getenv('FACEBOOK_APP_ID', ''))
+INSTAGRAM_APP_SECRET = os.getenv('INSTAGRAM_APP_SECRET', os.getenv('FACEBOOK_APP_SECRET', ''))
+FACEBOOK_APP_ID = os.getenv('FACEBOOK_APP_ID', INSTAGRAM_APP_ID)
+FACEBOOK_APP_SECRET = os.getenv('FACEBOOK_APP_SECRET', INSTAGRAM_APP_SECRET)
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', 'http://127.0.0.1:8000/oauth/callback/')
 INSTAGRAM_SCOPE = os.getenv(
     'INSTAGRAM_SCOPE',
@@ -250,7 +252,7 @@ CHECK_BATCH_SIZE = int(os.getenv('CHECK_BATCH_SIZE', '1000'))
 MAX_POSTS_PER_RUN = int(os.getenv('MAX_POSTS_PER_RUN', '50000'))
 
 # Instagram DRY_RUN rejimi (Instagram'siz sinash va simulyatsiya)
-INSTAGRAM_DRY_RUN = os.getenv('INSTAGRAM_DRY_RUN', 'False').lower() in ('true', '1', 't', 'yes')
+INSTAGRAM_DRY_RUN = os.getenv('INSTAGRAM_DRY_RUN', os.getenv('DRY_RUN', 'False')).lower() in ('true', '1', 't', 'yes')
 DRY_RUN_PUBLISH_DELAY_SECONDS = float(os.getenv('DRY_RUN_PUBLISH_DELAY_SECONDS', '2.0'))
 
 SPECTACULAR_SETTINGS = {
