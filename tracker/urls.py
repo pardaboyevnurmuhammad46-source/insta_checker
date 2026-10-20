@@ -19,6 +19,7 @@ from .views import (
     user_portal,
     user_portal_api,
     current_user_profile,
+    register_user,
     admin_create_user,
     admin_reset_password,
     change_password,
@@ -60,6 +61,8 @@ router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
     # User endpoints
+    path('api/register/', register_user, name='register_user'),
+    path('api/auth/register/', register_user, name='auth_register'),
     path('api/me/', current_user_profile, name='current_user_profile'),
     path('api/me/summary/', me_summary, name='me_summary'),
     path('api/me/posts/', me_posts, name='me_posts'),

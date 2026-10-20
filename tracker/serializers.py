@@ -255,6 +255,45 @@ class ChangePasswordSerializer(serializers.Serializer):
         return value
 
 
+class UserRegisterSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True)
+    name = serializers.CharField(max_length=255)
+    ig_user_id = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+
+    def validate_username(self, value):
+        val = value.strip()
+        if len(val) < 3:
+            raise serializers.ValidationError("Foydalanuvchi nomi kamida 3 ta belgidan iborat bo'lishi kerak.")
+        if User.objects.filter(username__iexact=val).exists():
+            raise serializers.ValidationError("Bunday foydalanuvchi nomi band. Iltimos boshqasini tanlang.")
+        return val
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value
+
+    def create(self, validated_data):
+        username = validated_data['username'].strip()
+        password = validated_data['password']
+        name = validated_data['name'].strip()
+        ig_user_id = validated_data.get('ig_user_id', '').strip() or None
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                password=password,
+                is_staff=False,
+            )
+            ig_user = InstagramUser.objects.create(
+                user=user,
+                name=name,
+                ig_user_id=ig_user_id,
+                status='pending',
+            )
+        return ig_user
+
+
 class ResetPasswordSerializer(serializers.Serializer):
     user_id = serializers.IntegerField(required=False)
     new_password = serializers.CharField(write_only=True)

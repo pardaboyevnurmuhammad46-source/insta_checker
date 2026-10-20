@@ -72,8 +72,13 @@
         {% if is_success %}
             <p style="font-size: 14px; font-weight: bold;">Videongiz Instagram Reels sahifangizga joylanmoqda. Bu biroz vaqt olishi mumkin.</p>
             {% if portal_url %}
+                <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+                    <a href="/app/video" class="btn" style="background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); color: white;">📸 Kabinetga qaytish</a>
+                    <a href="{{ portal_url }}" class="btn" style="background-color: #64748b;">📊 Post statistikasini ko'rish</a>
+                </div>
+            {% else %}
                 <div style="margin-top: 20px;">
-                    <a href="{{ portal_url }}" class="btn">📊 Post statistikasini ko'rish</a>
+                    <a href="/app/video" class="btn" style="background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); color: white;">📸 Kabinetga qaytish</a>
                 </div>
             {% endif %}
         {% endif %}

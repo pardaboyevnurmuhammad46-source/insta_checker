@@ -229,6 +229,62 @@
           "response": []
         },
         {
+          "name": "User Registration (Sign Up)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var rand = Math.floor(Math.random() * 1000000);",
+                  "pm.environment.set('reg_test_username', 'reg_user_' + rand);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Muvaffaqiyatli ro\\'yxatdan o\\'tilishi kerak (201)', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.access).to.be.a('string');",
+                  "    pm.expect(data.refresh).to.be.a('string');",
+                  "    pm.expect(data.role).to.eql('user');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{reg_test_username}}\",\n  \"password\": \"StrongRegisterPass123!_\",\n  \"name\": \"Yangi Registratsiya User\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/register/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "register",
+                ""
+              ]
+            },
+            "description": "Ommaviy ro'yxatdan o'tish (Sign Up) endpointi."
+          },
+          "response": []
+        },
+        {
           "name": "Token Refresh",
           "event": [
             {

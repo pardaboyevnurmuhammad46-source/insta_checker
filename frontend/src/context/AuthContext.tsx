@@ -8,6 +8,7 @@ interface AuthContextType {
   role: 'admin' | 'user' | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<UserProfile>;
+  register: (data: { username: string; password: string; name: string }) => Promise<UserProfile>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
 }
@@ -64,6 +65,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return profile;
   };
 
+  const register = async (data: { username: string; password: string; name: string }): Promise<UserProfile> => {
+    const response = await apiClient.post('/api/register/', data);
+    localStorage.setItem('access_token', response.data.access);
+    localStorage.setItem('refresh_token', response.data.refresh);
+    if (response.data.role) {
+      localStorage.setItem('user_role', response.data.role);
+      setRole(response.data.role);
+    }
+    setIsAuthenticated(true);
+    const profile = await fetchProfile();
+    if (!profile) {
+      throw new Error("Profil ma'lumotlarini yuklab bo'lmadi.");
+    }
+    return profile;
+  };
+
   const logout = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
@@ -78,7 +95,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, role, loading, login, logout, refreshProfile }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, role, loading, login, register, logout, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

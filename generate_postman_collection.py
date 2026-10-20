@@ -176,6 +176,30 @@ folder_01 = {
             ]
         ),
         make_req(
+            name="User Registration (Sign Up)",
+            method="POST",
+            path="/api/register/",
+            prerequest=[
+                "var rand = Math.floor(Math.random() * 1000000);",
+                "pm.environment.set('reg_test_username', 'reg_user_' + rand);",
+            ],
+            body={
+                "username": "{{reg_test_username}}",
+                "password": "StrongRegisterPass123!_",
+                "name": "Yangi Registratsiya User"
+            },
+            description="Ommaviy ro'yxatdan o'tish (Sign Up) endpointi.",
+            tests=[
+                "pm.test('Muvaffaqiyatli ro\\'yxatdan o\\'tilishi kerak (201)', function () {",
+                "    pm.response.to.have.status(201);",
+                "    var data = pm.response.json();",
+                "    pm.expect(data.access).to.be.a('string');",
+                "    pm.expect(data.refresh).to.be.a('string');",
+                "    pm.expect(data.role).to.eql('user');",
+                "});"
+            ]
+        ),
+        make_req(
             name="Token Refresh",
             method="POST",
             path="/api/token/refresh/",

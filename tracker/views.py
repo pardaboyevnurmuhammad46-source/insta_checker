@@ -22,6 +22,8 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
 from django.db.models import Q
 
+from rest_framework_simplejwt.tokens import RefreshToken
+
 # from .permissions import IsAdminRole, IsOwnerOrAdmin
 from .permissions import IsAdminRole, IsOwnerOrAdmin, IsAdminOrReadOnlyOwnerVideo
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
@@ -47,6 +49,7 @@ from .serializers import (
     NotificationSerializer,
     AdminCreateUserSerializer,
     AdminCreateUserOutputSerializer,
+    UserRegisterSerializer,
     ChangePasswordSerializer,
     ResetPasswordSerializer,
     MeSummarySerializer,
@@ -903,6 +906,38 @@ def admin_create_user(request):
         output = AdminCreateUserOutputSerializer(ig_user).data
         return Response(output, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(request=UserRegisterSerializer, responses={201: dict, 400: dict})
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_user(request):
+    """
+    Ommaviy ro'yxatdan o'tish (Sign Up) API si.
+    Yangi foydalanuvchi va uning Instagram profilini yaratadi,
+    darhol JWT access va refresh tokenlarini qaytaradi.
+    """
+    serializer = UserRegisterSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    ig_user = serializer.save()
+    user = ig_user.user
+
+    refresh = RefreshToken.for_user(user)
+    access = str(refresh.access_token)
+
+    return Response({
+        "message": "Muvaffaqiyatli ro'yxatdan o'tdingiz!",
+        "access": access,
+        "refresh": str(refresh),
+        "role": "user",
+        "username": user.username,
+        "user_id": user.id,
+        "name": ig_user.name,
+        "instagram_user_id": ig_user.id,
+        "status": ig_user.status,
+    }, status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])

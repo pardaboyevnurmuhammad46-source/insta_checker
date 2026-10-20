@@ -2391,5 +2391,50 @@ class DryRunFullFlowTestCase(TestCase):
         self.assertEqual(ig_user.status, "needs_reauth")
 
 
+class UserRegistrationTestCase(TestCase):
+    def test_user_register_success(self):
+        """Ochiq ro'yxatdan o'tish muvaffaqiyatli JWT tokenlar qaytarishi kerak."""
+        payload = {
+            "username": "new_public_user",
+            "password": "StrongPassword123!_",
+            "name": "Yangi Foydalanuvchi",
+        }
+        response = self.client.post("/api/register/", payload)
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertIn("access", data)
+        self.assertIn("refresh", data)
+        self.assertEqual(data["username"], "new_public_user")
+        self.assertEqual(data["role"], "user")
+
+        # Bazada yaratilganini tekshirish
+        user = User.objects.get(username="new_public_user")
+        self.assertFalse(user.is_staff)
+        self.assertTrue(hasattr(user, "instagram_user"))
+        self.assertEqual(user.instagram_user.name, "Yangi Foydalanuvchi")
+
+    def test_user_register_duplicate_username(self):
+        """Mavjud username bilan ro'yxatdan o'tish rad etilishi kerak."""
+        User.objects.create_user(username="existing_user", password="Pass123!_password")
+        payload = {
+            "username": "existing_user",
+            "password": "StrongPassword123!_",
+            "name": "Boshqa User",
+        }
+        response = self.client.post("/api/register/", payload)
+        self.assertEqual(response.status_code, 400)
+
+    def test_user_register_weak_password(self):
+        """Zaif parol bilan ro'yxatdan o'tish 400 qaytarishi kerak."""
+        payload = {
+            "username": "weak_pwd_user",
+            "password": "123",
+            "name": "Zaif Parol User",
+        }
+        response = self.client.post("/api/register/", payload)
+        self.assertEqual(response.status_code, 400)
+
+
+
 
 
