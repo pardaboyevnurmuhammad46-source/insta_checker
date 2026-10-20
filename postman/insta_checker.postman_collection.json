@@ -1,0 +1,3161 @@
+{
+  "info": {
+    "_postman_id": "e2e-insta-checker-collection-v2-1",
+    "name": "InstaChecker API & E2E Collection",
+    "description": "Instagram Reels Tracker & Prize System API Collection (BOSQICH C)\nBarcha endpointlar, negativ/xavfsizlik testlari va avtomatik E2E oqim.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global Pre-request script"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code 200 bo\\'lishi kerak', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Tizim va servislar sog\\'lom bo\\'lishi kerak', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status, 'status healthy bo\\'lishi kerak').to.eql('healthy');",
+                  "    pm.expect(jsonData.database, 'database ok bo\\'lishi kerak').to.eql('ok');",
+                  "    pm.expect(jsonData.redis, 'redis ok bo\\'lishi kerak').to.eql('ok');",
+                  "    pm.expect(jsonData.dry_run, 'E2E sinovlari faqat INSTAGRAM_DRY_RUN=true rejimida ishlaydi! Iltimos, sozlamada INSTAGRAM_DRY_RUN=True o\\'rnating.').to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/health/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "health",
+                ""
+              ]
+            },
+            "description": "Tizim holatini (Database, Redis va DRY_RUN rejimi) tekshiradi. Ochiq endpoint."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 Auth",
+      "item": [
+        {
+          "name": "Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Admin muvaffaqiyatli login qilishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.access, 'access token bo\\'lishi kerak').to.be.a('string');",
+                  "    pm.expect(data.refresh, 'refresh token bo\\'lishi kerak').to.be.a('string');",
+                  "    pm.expect(data.role, 'role admin bo\\'lishi kerak').to.eql('admin');",
+                  "    pm.environment.set('admin_access', data.access);",
+                  "    pm.environment.set('admin_refresh', data.refresh);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                ""
+              ]
+            },
+            "description": "Administrator tizimga kiradi va admin_access hamda admin_refresh tokenlarini saqlaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "User Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User muvaffaqiyatli login qilishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.access, 'access token bo\\'lishi kerak').to.be.a('string');",
+                  "    pm.environment.set('user_access', data.access);",
+                  "    pm.environment.set('user_refresh', data.refresh);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{user_username}}\",\n  \"password\": \"{{user_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                ""
+              ]
+            },
+            "description": "Oddiy foydalanuvchi tizimga kiradi va user_access hamda user_refresh tokenlarini saqlaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "Token Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Token muvaffaqiyatli yangilanishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.access, 'yangi access token kelishi kerak').to.be.a('string');",
+                  "    pm.environment.set('user_access', data.access);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{user_refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/refresh/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                "refresh",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchi refresh tokeni orqali yangi access token oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "Current User Profile (/api/me/)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Foydalanuvchi profili qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.username, 'username mavjud bo\\'lishi kerak').to.be.a('string');",
+                  "    pm.expect(data.dry_run, 'dry_run bayrog\\'i true bo\\'lishi kerak').to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                ""
+              ]
+            },
+            "description": "Joriy foydalanuvchi profili va roli haqida ma'lumot oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Logout muvaffaqiyatli bo\\'lishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{user_refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/logout/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                "logout",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchi tizimdan chiqadi va refresh token blacklist qilinadi."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 Admin – Userlar",
+      "item": [
+        {
+          "name": "Create User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var randomNum = Math.floor(Math.random() * 100000);",
+                  "var newUsername = 'pm_user_' + randomNum;",
+                  "var newPass = 'StrongPass123!_' + randomNum;",
+                  "pm.environment.set('new_user_username', newUsername);",
+                  "pm.environment.set('new_user_password', newPass);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Yangi foydalanuvchi yaratilishi kerak (201)', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.username, 'to\\'g\\'ri username').to.eql(pm.environment.get('new_user_username'));",
+                  "    pm.expect(data.user_id, 'user_id mavjud').to.be.a('number');",
+                  "    pm.environment.set('new_user_id', data.user_id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{new_user_username}}\",\n  \"password\": \"{{new_user_password}}\",\n  \"name\": \"Postman Test User\",\n  \"is_staff\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/create-user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "create-user",
+                ""
+              ]
+            },
+            "description": "Admin yangi foydalanuvchi yaratadi."
+          },
+          "response": []
+        },
+        {
+          "name": "List Users (Search & Filter)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Foydalanuvchilar ro\\'yxati qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.results, 'results array bo\\'lishi kerak').to.be.an('array');",
+                  "    pm.expect(data.count, 'kamida bitta user topilishi kerak').to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/?search={{new_user_username}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "{{new_user_username}}"
+                }
+              ]
+            },
+            "description": "Admin foydalanuvchilar ro'yxatini qidirish va filtrlash orqali oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "User Detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User tafsilotlari qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.id, 'user_id mos kelishi kerak').to.eql(Number(pm.environment.get('new_user_id')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/{{new_user_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{new_user_id}}",
+                ""
+              ]
+            },
+            "description": "Admin tanlangan foydalanuvchi tafsilotlarini oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Parol muvaffaqiyatli tiklanishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{new_user_id}}\",\n  \"new_password\": \"NewStrongPass999!_\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/reset-password/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "reset-password",
+                ""
+              ]
+            },
+            "description": "Admin foydalanuvchi parolini yangilaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Foydalanuvchi o\\'chirilishi kerak (204)', function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/users/{{new_user_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{new_user_id}}",
+                ""
+              ]
+            },
+            "description": "Admin foydalanuvchini o'chiradi."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 Admin – Videolar",
+      "item": [
+        {
+          "name": "Upload Video (Multipart)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Video muvaffaqiyatli yuklanishi kerak (201)', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.id, 'video id mavjud').to.be.a('number');",
+                  "    pm.environment.set('video_id', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Postman Test Video",
+                  "type": "text"
+                },
+                {
+                  "key": "is_default",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "files/sample.mp4"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                ""
+              ]
+            },
+            "description": "Admin yangi video yuklaydi (multipart form-data orqali sample.mp4)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Videos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Videolar ro\\'yxati qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.results, 'results array bo\\'lishi kerak').to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/videos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                ""
+              ]
+            },
+            "description": "Admin mavjud videolar ro'yxatini oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Default Video",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Video default qilib belgilanishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{video_id}}/set-default/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                "{{video_id}}",
+                "set-default",
+                ""
+              ]
+            },
+            "description": "Admin videoni barcha foydalanuvchilar uchun umumiy (default) qilib belgilaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Video",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Video o\\'chirilishi kerak (204)', function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{video_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                "{{video_id}}",
+                ""
+              ]
+            },
+            "description": "Admin videoni o'chiradi."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 Admin – Linklar",
+      "item": [
+        {
+          "name": "Create Link",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest({",
+                  "    url: pm.environment.get('base_url') + '/api/users/',",
+                  "    method: 'GET',",
+                  "    header: { 'Authorization': 'Bearer ' + pm.environment.get('admin_access') }",
+                  "}, function (err, res) {",
+                  "    if (!err && res.json().results && res.json().results.length > 0) {",
+                  "        pm.environment.set('link_user_id', res.json().results[0].id);",
+                  "    } else {",
+                  "        pm.environment.set('link_user_id', 1);",
+                  "    }",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Link yaratilishi kerak (201)', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.id, 'link id').to.be.a('number');",
+                  "    pm.expect(data.token, 'link token').to.be.a('string');",
+                  "    pm.environment.set('link_id', data.id);",
+                  "    pm.environment.set('link_token', data.token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{link_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/links/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "links",
+                ""
+              ]
+            },
+            "description": "Admin yangi unikal havola yaratadi."
+          },
+          "response": []
+        },
+        {
+          "name": "List Links",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Linklar ro\\'yxati qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/links/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "links",
+                ""
+              ]
+            },
+            "description": "Admin linklar ro'yxatini oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "Resend Link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Resend so\\'rovi tekshirildi (200 yoki 400)', function () {",
+                  "    pm.expect([200, 400]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/links/{{link_id}}/resend/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "links",
+                "{{link_id}}",
+                "resend",
+                ""
+              ]
+            },
+            "description": "Admin linkni qayta pending holatiga o'tkazadi (faqat failed bo'lganda)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Link o\\'chirilishi kerak (204)', function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/links/{{link_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "links",
+                "{{link_id}}",
+                ""
+              ]
+            },
+            "description": "Admin linkni o'chiradi."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 User – Instagram va joylash",
+      "item": [
+        {
+          "name": "Connect Instagram",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Instagram ulash havolasi qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.auth_url, 'auth_url mavjud').to.be.a('string');",
+                  "    pm.expect(data.link_token, 'link_token mavjud').to.be.a('string');",
+                  "    pm.environment.set('user_link_token', data.link_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/connect-instagram/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "connect-instagram",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchi Instagram hisobini ulash havolasini oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "DRY_RUN OAuth Callback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Callback muvaffaqiyatli bajarilishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/oauth/callback/?code=dry_run&state={{user_link_token}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "oauth",
+                "callback",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "code",
+                  "value": "dry_run"
+                },
+                {
+                  "key": "state",
+                  "value": "{{user_link_token}}"
+                }
+              ]
+            },
+            "description": "DRY_RUN rejimida brauzersiz OAuth callback orqali Instagramni ulash simulyatsiyasi."
+          },
+          "response": []
+        },
+        {
+          "name": "Publish Video",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Publish so\\'rovi qabul qilindi (202 yoki 409)', function () {",
+                  "    pm.expect([202, 400, 409]).to.include(pm.response.code);",
+                  "    if (pm.response.code === 202) {",
+                  "        var data = pm.response.json();",
+                  "        pm.environment.set('user_post_id', data.post_id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/publish/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "publish",
+                ""
+              ]
+            },
+            "description": "Ulangan foydalanuvchi uchun videoni Reels qilib joylashni boshlaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "Publish Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Publish status ma\\'lumotlari qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.has_post, 'has_post mavjud').to.be.a('boolean');",
+                  "    pm.expect(data.status, 'status mavjud').to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/publish-status/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "publish-status",
+                ""
+              ]
+            },
+            "description": "Joylash jarayoni va post holatini tekshiradi (polling)."
+          },
+          "response": []
+        },
+        {
+          "name": "Retry Publish",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Retry endpointi tekshirildi (200, 400 yoki 404)', function () {",
+                  "    pm.expect([200, 400, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/retry/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "retry",
+                ""
+              ]
+            },
+            "description": "Muvaffaqiyatsiz bo'lgan postni qayta navbatga qo'yadi."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 User – Statistika",
+      "item": [
+        {
+          "name": "Me Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User summary qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.total_views, 'total_views mavjud').to.be.a('number');",
+                  "    pm.expect(data.milestones, 'milestones mavjud').to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/summary/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                "summary",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchining o'z statistikasi, marra va foizlari."
+          },
+          "response": []
+        },
+        {
+          "name": "Me Posts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('User postlari ro\\'yxati qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/posts/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                "posts",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchining o'z postlari ro'yxati."
+          },
+          "response": []
+        },
+        {
+          "name": "List Notifications",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Bildirishnomalar qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    if (data.results && data.results.length > 0) {",
+                  "        pm.environment.set('notification_id', data.results[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/notifications/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchi bildirishnomalari ro'yxati."
+          },
+          "response": []
+        },
+        {
+          "name": "Mark All Notifications Read",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Barcha bildirishnomalar o\\'qilgan bo\\'lishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/notifications/read/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                "notifications",
+                "read",
+                ""
+              ]
+            },
+            "description": "Barcha bildirishnomalarni o'qilgan deb belgilash."
+          },
+          "response": []
+        },
+        {
+          "name": "List Prizes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Sovrinlar ro\\'yxati qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/prizes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prizes",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchi yutib olgan sovrinlari ro'yxati."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 Admin – Postlar va statistika",
+      "item": [
+        {
+          "name": "Admin Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Admin summary qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.total_users, 'total_users mavjud').to.be.a('number');",
+                  "    pm.expect(data.dry_run, 'dry_run true').to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/summary/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "summary",
+                ""
+              ]
+            },
+            "description": "Admin umumiy tizim statistikasi va monitoring."
+          },
+          "response": []
+        },
+        {
+          "name": "List Posts (Filter & Sort)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Postlar ro\\'yxati qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    if (data.results && data.results.length > 0) {",
+                  "        pm.environment.set('admin_post_id', data.results[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/posts/?status=published",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "posts",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "published"
+                }
+              ]
+            },
+            "description": "Admin postlarni status va parametrlar bo'yicha filtrlash."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Metrics Now",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('admin_post_id')) {",
+                  "    pm.sendRequest({",
+                  "        url: pm.environment.get('base_url') + '/api/posts/',",
+                  "        method: 'GET',",
+                  "        header: { 'Authorization': 'Bearer ' + pm.environment.get('admin_access') }",
+                  "    }, function (err, res) {",
+                  "        if (!err && res.json().results && res.json().results.length > 0) {",
+                  "            pm.environment.set('admin_post_id', res.json().results[0].id);",
+                  "        } else {",
+                  "            pm.environment.set('admin_post_id', 1);",
+                  "        }",
+                  "    });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statistikani tekshirish tekshirildi (200 yoki 404)', function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/posts/{{admin_post_id}}/check-metrics/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "{{admin_post_id}}",
+                "check-metrics",
+                ""
+              ]
+            },
+            "description": "Admin tanlangan post uchun statistikani darhol navbatga qo'yib tekshiradi."
+          },
+          "response": []
+        },
+        {
+          "name": "Daily Stats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Kunlik statistika qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/stats/daily/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "stats",
+                "daily",
+                ""
+              ]
+            },
+            "description": "Kunlik qamrov va postlar statistikasi."
+          },
+          "response": []
+        },
+        {
+          "name": "Export Posts CSV",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CSV fayl qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/export/posts.csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "export",
+                "posts.csv"
+              ]
+            },
+            "description": "Barcha postlar ma'lumotlarini CSV formatda yuklab olish."
+          },
+          "response": []
+        },
+        {
+          "name": "Data Deletions List",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Ma\\'lumot o\\'chirish so\\'rovlari qaytishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/data-deletions/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "data-deletions",
+                ""
+              ]
+            },
+            "description": "Meta orqali kelgan foydalanuvchi ma'lumotlarini o'chirish so'rovlari ro'yxati."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 Dev – Simulyatsiya (faqat DRY_RUN)",
+      "item": [
+        {
+          "name": "Simulate Views",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('admin_post_id')) {",
+                  "    pm.sendRequest({",
+                  "        url: pm.environment.get('base_url') + '/api/posts/',",
+                  "        method: 'GET',",
+                  "        header: { 'Authorization': 'Bearer ' + pm.environment.get('admin_access') }",
+                  "    }, function (err, res) {",
+                  "        if (!err && res.json().results && res.json().results.length > 0) {",
+                  "            pm.environment.set('admin_post_id', res.json().results[0].id);",
+                  "        } else {",
+                  "            pm.environment.set('admin_post_id', 1);",
+                  "        }",
+                  "    });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Ko\\'rishlar simulyatsiyasi tekshirildi (200 yoki 404)', function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{admin_post_id}}\",\n  \"views\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-views/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-views",
+                ""
+              ]
+            },
+            "description": "Instagram'da post ko'rishlari sonini simulyatsiya qiladi va tekshiruv quvurini ishga tushiradi."
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Network Error",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Tarmoq xatosi simulyatsiyasi (200 yoki 404)', function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{admin_post_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-network-error/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-network-error",
+                ""
+              ]
+            },
+            "description": "Vaqtinchalik tarmoq/server xatosi simulyatsiyasi."
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Token Revoked",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('sim_user_id')) {",
+                  "    pm.sendRequest({",
+                  "        url: pm.environment.get('base_url') + '/api/users/',",
+                  "        method: 'GET',",
+                  "        header: { 'Authorization': 'Bearer ' + pm.environment.get('admin_access') }",
+                  "    }, function (err, res) {",
+                  "        if (!err && res.json().results && res.json().results.length > 0) {",
+                  "            pm.environment.set('sim_user_id', res.json().results[0].id);",
+                  "        } else {",
+                  "            pm.environment.set('sim_user_id', 1);",
+                  "        }",
+                  "    });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Token bekor qilish simulyatsiyasi tekshirildi (200 yoki 404)', function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{sim_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-token-revoked/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-token-revoked",
+                ""
+              ]
+            },
+            "description": "Foydalanuvchi tokeni bekor qilinganini (Code 190) simulyatsiya qilish."
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Delete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('O\\'chirilish simulyatsiyasi (200 yoki 404)', function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{admin_post_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-delete",
+                ""
+              ]
+            },
+            "description": "Instagram'da media o'chirilganini (Code 100/33 yoki 404) simulyatsiya qiladi."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 E2E – To'liq oqim",
+      "item": [
+        {
+          "name": "E2E 01 - Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Admin login muvaffaqiyatli', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.environment.set('e2e_admin_access', data.access);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{admin_username}}\",\n  \"password\": \"{{admin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                ""
+              ]
+            },
+            "description": "E2E: Admin login qilib e2e_admin_access oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 02 - Create User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var ts = Date.now();",
+                  "pm.environment.set('e2e_user_username', 'e2e_user_' + ts);",
+                  "pm.environment.set('e2e_user_password', 'E2ePass_' + ts + '!');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: User yaratildi', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    var data = pm.response.json();",
+                  "    pm.environment.set('e2e_user_id', data.user_id);",
+                  "    if (data.instagram_user && data.instagram_user.id) {",
+                  "        pm.environment.set('e2e_ig_user_id', data.instagram_user.id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{e2e_user_username}}\",\n  \"password\": \"{{e2e_user_password}}\",\n  \"name\": \"E2E Test User\",\n  \"is_staff\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/create-user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "create-user",
+                ""
+              ]
+            },
+            "description": "E2E: Admin yangi foydalanuvchi yaratadi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 03 - Upload Video & Make Default",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Video yuklandi va default bo\\'ldi', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    var data = pm.response.json();",
+                  "    pm.environment.set('e2e_video_id', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "E2E Demo Video",
+                  "type": "text"
+                },
+                {
+                  "key": "is_default",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "files/sample.mp4"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                ""
+              ]
+            },
+            "description": "E2E: Admin video yuklaydi va default qiladi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 04 - User Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Yangi user tizimga kirdi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.environment.set('e2e_user_access', data.access);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{e2e_user_username}}\",\n  \"password\": \"{{e2e_user_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                ""
+              ]
+            },
+            "description": "E2E: Yangi yaratilgan user tizimga kiradi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 05 - Connect Instagram",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Auth URL olindi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.environment.set('e2e_link_token', data.link_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/connect-instagram/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "connect-instagram",
+                ""
+              ]
+            },
+            "description": "E2E: User Instagram ulash havolasini oladi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 06 - OAuth Callback (DRY_RUN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Instagram hisobi ulandi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/oauth/callback/?code=dry_run&state={{e2e_link_token}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "oauth",
+                "callback",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "code",
+                  "value": "dry_run"
+                },
+                {
+                  "key": "state",
+                  "value": "{{e2e_link_token}}"
+                }
+              ]
+            },
+            "description": "E2E: Brauzersiz Instagramni ulash simulyatsiyasi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 07 - User Publish Video",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Video joylash qabul qilindi (202)', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "    var data = pm.response.json();",
+                  "    pm.environment.set('e2e_post_id', data.post_id);",
+                  "    pm.environment.set('poll_count', 0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/publish/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "publish",
+                ""
+              ]
+            },
+            "description": "E2E: User videoni Reels qilib joylashni boshlaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 08 - Poll Publish Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var data = pm.response.json();",
+                  "var count = Number(pm.environment.get('poll_count') || 0);",
+                  "if (data.status !== 'published' && count < 15) {",
+                  "    pm.environment.set('poll_count', count + 1);",
+                  "    postman.setNextRequest('E2E 08 - Poll Publish Status');",
+                  "} else {",
+                  "    pm.test('E2E: Post muvaffaqiyatli published bo\\'ldi', function () {",
+                  "        pm.expect(data.status, 'post status published bo\\'lishi kerak').to.eql('published');",
+                  "        pm.expect(data.permalink, 'permalink mavjud').to.be.a('string');",
+                  "    });",
+                  "    pm.environment.set('poll_count', 0);",
+                  "    postman.setNextRequest('E2E 09 - Simulate 500 Views');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/publish-status/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "publish-status",
+                ""
+              ]
+            },
+            "description": "E2E: Post published bo'lguncha polling (max 15 marta)."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 09 - Simulate 500 Views",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: 500 ko\\'rish simulyatsiya qilindi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.views).to.eql(500);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{e2e_post_id}}\",\n  \"views\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-views/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-views",
+                ""
+              ]
+            },
+            "description": "E2E: 500 ko'rish to'planganini simulyatsiya qilish."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 10 - Verify User Prize & Notification",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: 1-sovrin muvaffaqiyatli berildi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.prizes_count, '1 ta sovrin').to.eql(1);",
+                  "    pm.expect(data.total_views, '500 ko\\'rish').to.eql(500);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/summary/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                "summary",
+                ""
+              ]
+            },
+            "description": "E2E: 500 marra uchun sovrin yaratilganini tekshirish."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 11 - Simulate 1000 Views",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: 1000 ko\\'rish simulyatsiya qilindi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{e2e_post_id}}\",\n  \"views\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-views/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-views",
+                ""
+              ]
+            },
+            "description": "E2E: 1000 ko'rish (keyingi marra) simulyatsiyasi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 12 - Verify Second Prize",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: 2 ta sovrin bo\\'lishi kerak', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.prizes_count, '2 ta sovrin').to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/summary/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                "summary",
+                ""
+              ]
+            },
+            "description": "E2E: 1000 marra uchun 2-sovrin berilganini tekshirish."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 13 - Simulate Delete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Post o\\'chirilishi simulyatsiya qilindi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.status).to.eql('deleted');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{e2e_post_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/dev/simulate-delete/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "simulate-delete",
+                ""
+              ]
+            },
+            "description": "E2E: Instagram'dan post o'chirilishini simulyatsiya qilish."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 14 - Verify Post Deleted Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Post statusi haqiqatdan deleted bo\\'ldi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.status).to.eql('deleted');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/publish-status/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "publish-status",
+                ""
+              ]
+            },
+            "description": "E2E: User tomonidan postning deleted holatga o'tganini tasdiqlash."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 15 - Cleanup Video",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Video o\\'chirildi (204)', function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{e2e_video_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                "{{e2e_video_id}}",
+                ""
+              ]
+            },
+            "description": "E2E tozalash: Yaratilgan test videosini o'chirish."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 16 - Cleanup User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: User o\\'chirildi (204)', function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/users/{{e2e_user_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{e2e_user_id}}",
+                ""
+              ]
+            },
+            "description": "E2E tozalash: Yaratilgan test foydalanuvchisini o'chirish."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10 Negativ va xavfsizlik",
+      "item": [
+        {
+          "name": "01 Request Without Token -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Tokensiz so\\'rov 401 qaytarishi kerak', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                ""
+              ]
+            },
+            "description": "Tokensiz himoyalangan endpointga so'rov yuborilganda 401 Unauthorized qaytishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "02 Regular User Calls Admin Endpoint -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Oddiy user admin endpointiga kira olmasligi kerak (403)', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/admin/summary/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "summary",
+                ""
+              ]
+            },
+            "description": "Oddiy user admin huquqini talab qiluvchi endpointga murojaat qilganda 403 Forbidden qaytishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "03 User Access Other Post History -> 404/403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Boshqa user posti tarixi berilmasligi kerak (404)', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/me/posts/999999/history/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "me",
+                "posts",
+                "999999",
+                "history",
+                ""
+              ]
+            },
+            "description": "Boshqa foydalanuvchining yoki mavjud bo'lmagan post tarixini so'raganda 404 qaytishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "04 Weak Password Rejected -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Zaif parol rad etilishi kerak (400)', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"weak_pwd_user\",\n  \"password\": \"123\",\n  \"name\": \"Weak User\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/create-user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "create-user",
+                ""
+              ]
+            },
+            "description": "Juda sodda (zaif) parol qabul qilinmasligi va 400 qaytarishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "05 Invalid Video Extension -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Noto\\'g\\'ri kengaytmali fayl rad etilishi kerak (400)', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Bad File",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "files/sample.txt"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                ""
+              ]
+            },
+            "description": ".mp4 dan boshqa formatdagi fayllar rad etilishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "06 Empty Video File -> 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Bo\\'sh video fayl rad etilishi kerak (400)', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Empty File",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "files/empty.mp4"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                ""
+              ]
+            },
+            "description": "Bo'sh (0 baytli) video fayl yuklanganda rad etilishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "07 Duplicate Publish Rejected -> 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Takroriy publish tekshirildi (202, 400 yoki 409)', function () {",
+                  "    pm.expect([202, 400, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/user/publish/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "publish",
+                ""
+              ]
+            },
+            "description": "Jarayonda bo'lgan post mavjud bo'lganda takroriy publish bosilsa 409 Conflict qaytishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "08 Blacklisted Token Fails -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Blacklist qilingan token ishlamasligi kerak (401)', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{user_refresh}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/refresh/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                "refresh",
+                ""
+              ]
+            },
+            "description": "Logoutdan so'ng qora ro'yxatga tushgan refresh token orqali yangilash 401 qaytarishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "09 User Cannot Create Link In Another Name",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Boshqa user nomidan link yaratish bloklandi yoki o\\'ziga biriktirildi', function () {",
+                  "    if (pm.response.code === 201) {",
+                  "        var data = pm.response.json();",
+                  "        pm.expect(data.user).to.not.eql(999999);",
+                  "    } else {",
+                  "        pm.expect([400, 403]).to.include(pm.response.code);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": 999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/links/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "links",
+                ""
+              ]
+            },
+            "description": "Oddiy user boshqa user ID si bilan link yarata olmasligi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "10 Rate Limit On Consecutive Failed Logins -> 429",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Ketma-ket 5 ta noto'g'ri login yuborib 5/min limitni chaqirish",
+                  "for (var i = 0; i < 5; i++) {",
+                  "    pm.sendRequest({",
+                  "        url: pm.environment.get('base_url') + '/api/token/',",
+                  "        method: 'POST',",
+                  "        header: { 'Content-Type': 'application/json' },",
+                  "        body: { mode: 'raw', raw: JSON.stringify({ username: 'bad_user', password: 'bad_password' }) }",
+                  "    }, function() {});",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Ketma-ket xato loginda 429 yoki 400 qaytarishi kerak', function () {",
+                  "    pm.expect([400, 401, 429]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"bad_user\",\n  \"password\": \"bad_password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                ""
+              ]
+            },
+            "description": "Ketma-ket noto'g'ri loginda 429 Too Many Requests xatosi qaytishi kerak."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

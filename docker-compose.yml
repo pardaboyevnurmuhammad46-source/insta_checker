@@ -21,7 +21,7 @@ services:
     build: .
     command: /app/entrypoint.sh
     volumes:
-      # - .:/app
+      - .:/app
       - media_volume:/app/media
       - static_volume:/app/static
     ports:
@@ -31,6 +31,8 @@ services:
       - DB_HOST=db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - INSTAGRAM_DRY_RUN=True
+      - DRY_RUN_PUBLISH_DELAY_SECONDS=0
     depends_on:
       db:
         condition: service_healthy
@@ -42,13 +44,15 @@ services:
     # gevent yoki yuqori concurrency bilan ishlash tavsiya etiladi (masalan: -P gevent yoki --concurrency 16)
     command: celery -A config worker -l info --concurrency 16
     volumes:
-      # - .:/app
+      - .:/app
       - media_volume:/app/media
     env_file: .env
     environment:
       - DB_HOST=db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - INSTAGRAM_DRY_RUN=True
+      - DRY_RUN_PUBLISH_DELAY_SECONDS=0
     depends_on:
       - redis
       - db
@@ -56,11 +60,15 @@ services:
   beat:
     build: .
     command: celery -A config beat -l info
+    volumes:
+      - .:/app
     env_file: .env
     environment:
       - DB_HOST=db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - INSTAGRAM_DRY_RUN=True
+      - DRY_RUN_PUBLISH_DELAY_SECONDS=0
     depends_on:
       - redis
       - db
@@ -74,6 +82,34 @@ services:
       - media_volume:/app/media
       - static_volume:/app/static
       - ./frontend/dist:/usr/share/nginx/html
+    depends_on:
+      - web
+
+  newman:
+    image: postman/newman:alpine
+    profiles:
+      - e2e
+    volumes:
+      - ./postman:/etc/newman
+    working_dir: /etc/newman
+    command:
+      - run
+      - insta_checker.postman_collection.json
+      - -e
+      - local.postman_environment.json
+      - --env-var
+      - base_url=http://web:8000
+      - --env-var
+      - admin_username=admin
+      - --env-var
+      - admin_password=admin123
+      - --env-var
+      - user_username=bekzod
+      - --env-var
+      - user_password=user123
+      - --working-dir
+      - /etc/newman
+      - --bail
     depends_on:
       - web
 

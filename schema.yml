@@ -1,0 +1,2672 @@
+openapi: 3.0.3
+info:
+  title: InstaChecker API
+  version: 1.0.0
+  description: Instagram Reels Tracker & Prize System API
+paths:
+  /api/admin/create-user/:
+    post:
+      operationId: api_admin_create_user_create
+      description: 'Faqat admin uchun: Yangi foydalanuvchi (Django User + InstagramUser)
+        yaratish.'
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCreateUserOutput'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/admin/export/posts.csv:
+    get:
+      operationId: api_admin_export_posts.csv_retrieve
+      description: |-
+        Admin: Filtrga mos postlarni oqimli (StreamingHttpResponse) CSV qilib eksport qilish.
+        Katta ma'lumotlarda xotirani to'ldirmaydi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/posts/:
+    get:
+      operationId: api_admin_posts_retrieve
+      description: |-
+        Admin: Filtr (status, sana oralig'i, user), saralash (views), pagination bilan postlar ro'yxati.
+        O'chirilgan postlar va deleted_detected_at ko'rinadi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/reset-password/:
+    post:
+      operationId: api_admin_reset_password_create
+      description: 'Faqat admin uchun: istalgan userning parolini tiklash.'
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/stats/daily/:
+    get:
+      operationId: api_admin_stats_daily_retrieve
+      description: 'Admin: Kunlar bo''yicha yangi postlar va jami views (grafik uchun).'
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/summary/:
+    get:
+      operationId: api_admin_summary_retrieve
+      description: Admin uchun umumiy statistika (Redis keshda 60 soniya saqlanadi).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSummary'
+          description: ''
+  /api/admin/users/:
+    get:
+      operationId: api_admin_users_retrieve
+      description: |-
+        Admin: Har user bo'yicha statistika (postlar, views, likes, comments, oxirgi post sanasi, holati),
+        qidiruv, filtr, saralash va pagination bilan. N+1 yo'q.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/admin/users/{user_id}/:
+    get:
+      operationId: api_admin_users_retrieve_2
+      description: 'Admin: Foydalanuvchi tafsilotlari va uning postlari / statistikasi
+        tarixi.'
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/change-password/:
+    post:
+      operationId: api_change_password_create
+      description: Oddiy user yoki admin o'z parolini eski parolni kiritish orqali
+        yangilaydi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/dashboard/:
+    get:
+      operationId: api_dashboard_retrieve
+      description: Admin uchun umumiy statistika (Redis keshda 60 soniya saqlanadi).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSummary'
+          description: ''
+  /api/data-deletions/:
+    get:
+      operationId: api_data_deletions_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDataDeletionRequestList'
+          description: ''
+  /api/data-deletions/{id}/:
+    get:
+      operationId: api_data_deletions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this data deletion request.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataDeletionRequest'
+          description: ''
+  /api/dev/simulate-delete/:
+    post:
+      operationId: api_dev_simulate_delete_create
+      description: 'Faqat DRY_RUN rejimida: Instagram''da post o''chirilganini (Code
+        100/33 yoki 404) simulyatsiya qilish va tekshiruv quvurini ishga tushirish.'
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatePostActionInputRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SimulatePostActionInputRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SimulatePostActionInputRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/dev/simulate-network-error/:
+    post:
+      operationId: api_dev_simulate_network_error_create
+      description: 'Faqat DRY_RUN rejimida: Instagram vaqtinchalik tarmoq/server xatosini
+        simulyatsiya qilish.'
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatePostActionInputRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SimulatePostActionInputRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SimulatePostActionInputRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/dev/simulate-token-revoked/:
+    post:
+      operationId: api_dev_simulate_token_revoked_create
+      description: 'Faqat DRY_RUN rejimida: Instagram foydalanuvchi tokeni bekor qilinganini
+        (Code 190) simulyatsiya qilish.'
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulateUserActionInputRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SimulateUserActionInputRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SimulateUserActionInputRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/dev/simulate-views/:
+    post:
+      operationId: api_dev_simulate_views_create
+      description: 'Faqat DRY_RUN rejimida: Post ko''rishlarini Instagram''da simulyatsiya
+        qilish va haqiqiy tekshiruv quvurini (prizlar, statistika) ishga tushirish.'
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulateViewsInputRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SimulateViewsInputRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SimulateViewsInputRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/health/:
+    get:
+      operationId: api_health_retrieve
+      description: Tizim holatini (Database, Redis va DRY_RUN rejimi) tekshirish.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckOutput'
+          description: ''
+  /api/links/:
+    get:
+      operationId: api_links_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - failed
+          - opened
+          - pending
+          - posted
+        description: |-
+          * `pending` - Pending
+          * `opened` - Opened
+          * `posted` - Posted
+          * `failed` - Failed
+      - in: query
+        name: user
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUniqueLinkList'
+          description: ''
+    post:
+      operationId: api_links_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniqueLink'
+          description: ''
+  /api/links/{id}/:
+    get:
+      operationId: api_links_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this unique link.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniqueLink'
+          description: ''
+    put:
+      operationId: api_links_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this unique link.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniqueLink'
+          description: ''
+    patch:
+      operationId: api_links_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this unique link.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUniqueLinkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUniqueLinkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUniqueLinkRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniqueLink'
+          description: ''
+    delete:
+      operationId: api_links_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this unique link.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/links/{id}/resend/:
+    post:
+      operationId: api_links_resend_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this unique link.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UniqueLinkRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniqueLink'
+          description: ''
+  /api/me/:
+    get:
+      operationId: api_me_retrieve
+      description: Joriy tizimga kirgan foydalanuvchi ma'lumotlari va roli (/api/me/).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileOutput'
+          description: ''
+  /api/me/notifications/:
+    get:
+      operationId: api_me_notifications_retrieve
+      description: Foydalanuvchining bildirishnomalari va o'qilmaganlar soni.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/me/notifications/read/:
+    post:
+      operationId: api_me_notifications_read_create
+      description: Bildirishnomani o'qilgan deb belgilash (bitta yoki barchasini).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/me/posts/:
+    get:
+      operationId: api_me_posts_retrieve
+      description: Foydalanuvchining o'z postlari (pagination bilan).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/me/posts/{post_id}/history/:
+    get:
+      operationId: api_me_posts_history_retrieve
+      description: PostStat tarixi (grafik uchun, vaqt bo'yicha o'sish tartibida).
+      parameters:
+      - in: path
+        name: post_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/me/prizes/:
+    get:
+      operationId: api_me_prizes_retrieve
+      description: Foydalanuvchining sovrinlari.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/me/summary/:
+    get:
+      operationId: api_me_summary_retrieve
+      description: |-
+        Faqat joriy foydalanuvchining o'z statistikasi:
+        jami views, like, comment, postlar soni, prizlar soni, oxirgi tekshiruv vaqti.
+        BOSQICH A: progress va milestone ma'lumotlari bilan qaytadi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeSummary'
+          description: ''
+  /api/notifications/:
+    get:
+      operationId: api_notifications_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationList'
+          description: ''
+  /api/notifications/{id}/:
+    get:
+      operationId: api_notifications_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this notification.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/notifications/{id}/mark-read/:
+    post:
+      operationId: api_notifications_mark_read_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this notification.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/post-stats/:
+    get:
+      operationId: api_post_stats_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPostStatList'
+          description: ''
+  /api/post-stats/{id}/:
+    get:
+      operationId: api_post_stats_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post stat.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostStat'
+          description: ''
+  /api/posts/:
+    get:
+      operationId: api_posts_list
+      parameters:
+      - in: query
+        name: link__user
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - deleted
+          - failed
+          - published
+          - publishing
+          - queued
+        description: |-
+          * `queued` - Queued
+          * `publishing` - Publishing
+          * `published` - Published
+          * `deleted` - Deleted
+          * `failed` - Failed
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPostList'
+          description: ''
+  /api/posts/{id}/:
+    get:
+      operationId: api_posts_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/check-metrics/:
+    post:
+      operationId: api_posts_check_metrics_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/retry/:
+    post:
+      operationId: api_posts_retry_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/stats/:
+    get:
+      operationId: api_posts_stats_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/prizes/:
+    get:
+      operationId: api_prizes_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPrizeList'
+          description: ''
+  /api/prizes/{id}/:
+    get:
+      operationId: api_prizes_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prize.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prize'
+          description: ''
+  /api/public/post/{token}/:
+    get:
+      operationId: api_public_post_retrieve
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/token/:
+    post:
+      operationId: api_token_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomTokenObtainPairRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CustomTokenObtainPairRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CustomTokenObtainPairRequest'
+        required: true
+      responses:
+        '200':
+          description: No response body
+  /api/token/logout/:
+    post:
+      operationId: api_token_logout_create
+      description: |-
+        Takes a token and blacklists it. Must be used with the
+        `rest_framework_simplejwt.token_blacklist` app installed.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenBlacklistRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenBlacklistRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenBlacklistRequest'
+        required: true
+      responses:
+        '200':
+          description: No response body
+  /api/token/refresh/:
+    post:
+      operationId: api_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/user/connect-instagram/:
+    get:
+      operationId: api_user_connect_instagram_retrieve
+      description: Foydalanuvchi o'z kabinetidan Instagramga ulanish oqimini boshlaydi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: api_user_connect_instagram_create
+      description: Foydalanuvchi o'z kabinetidan Instagramga ulanish oqimini boshlaydi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/user/publish/:
+    post:
+      operationId: api_user_publish_create
+      description: |-
+        Ulangan foydalanuvchi uchun videoni Reels qilib joylash vazifasini boshlaydi.
+        Takroriy bosishdan himoyalangan (queued/publishing bo'lsa yangisini boshlamaydi).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/user/publish-status/:
+    get:
+      operationId: api_user_publish_status_retrieve
+      description: |-
+        Foydalanuvchi o'zining so'nggi post holatini (polling) tekshiradi.
+        BOSQICH A: can_publish, can_publish_reason, can_retry, retries_left, upload_limits maydonlari qo'shiladi.
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPublishStatusOutput'
+          description: ''
+  /api/user/retry/:
+    post:
+      operationId: api_user_retry_create
+      description: Muvaffaqiyatsiz bo'lgan postni qayta urinish (maksimal 3 marta).
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/users/:
+    get:
+      operationId: api_users_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - connected
+          - needs_reauth
+          - pending
+        description: |-
+          * `pending` - Pending
+          * `connected` - Connected
+          * `needs_reauth` - Needs Reauth
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInstagramUserList'
+          description: ''
+    post:
+      operationId: api_users_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+  /api/users/{id}/:
+    get:
+      operationId: api_users_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this instagram user.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+    put:
+      operationId: api_users_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this instagram user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+    patch:
+      operationId: api_users_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this instagram user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedInstagramUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedInstagramUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedInstagramUserRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+    delete:
+      operationId: api_users_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this instagram user.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/users/{id}/refresh-token/:
+    post:
+      operationId: api_users_refresh_token_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this instagram user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+  /api/users/{id}/reset-password/:
+    post:
+      operationId: api_users_reset_password_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this instagram user.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+  /api/users/create-user/:
+    post:
+      operationId: api_users_create_user_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstagramUserRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstagramUser'
+          description: ''
+  /api/videos/:
+    get:
+      operationId: api_videos_list
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: is_default
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: owner
+        schema:
+          type: integer
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVideoList'
+          description: ''
+    post:
+      operationId: api_videos_create
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+          description: ''
+  /api/videos/{id}/:
+    get:
+      operationId: api_videos_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this video.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+          description: ''
+    put:
+      operationId: api_videos_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this video.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+          description: ''
+    patch:
+      operationId: api_videos_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this video.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVideoRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVideoRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVideoRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+          description: ''
+    delete:
+      operationId: api_videos_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this video.
+        required: true
+      tags:
+      - api
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/videos/{id}/assign-owner/:
+    post:
+      operationId: api_videos_assign_owner_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this video.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+          description: ''
+  /api/videos/{id}/set-default/:
+    post:
+      operationId: api_videos_set_default_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this video.
+        required: true
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VideoRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+          description: ''
+  /link/:
+    get:
+      operationId: link_retrieve
+      tags:
+      - link
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /link/{token}/:
+    get:
+      operationId: link_retrieve_2
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - link
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /my-post/{token}/:
+    get:
+      operationId: my_post_retrieve
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - my-post
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /oauth/callback/:
+    get:
+      operationId: oauth_callback_retrieve
+      tags:
+      - oauth
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /oauth/data-deletion/:
+    post:
+      operationId: oauth_data_deletion_create
+      description: Meta Data Deletion Request Callback URL.
+      tags:
+      - oauth
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /oauth/data-deletion/status/{confirmation_code}/:
+    get:
+      operationId: oauth_data_deletion_status_retrieve
+      parameters:
+      - in: path
+        name: confirmation_code
+        schema:
+          type: string
+        required: true
+      tags:
+      - oauth
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /oauth/deauthorize/:
+    post:
+      operationId: oauth_deauthorize_create
+      description: Meta Deauthorize Callback URL.
+      tags:
+      - oauth
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    AdminCreateUserOutput:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+        role:
+          type: string
+          readOnly: true
+        is_staff:
+          type: boolean
+          readOnly: true
+        instagram_user:
+          allOf:
+          - $ref: '#/components/schemas/InstagramUser'
+          readOnly: true
+      required:
+      - instagram_user
+      - is_staff
+      - role
+      - user_id
+      - username
+    AdminCreateUserRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 150
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        is_staff:
+          type: boolean
+          default: false
+        ig_user_id:
+          type: string
+          default: ''
+          maxLength: 100
+      required:
+      - name
+      - password
+      - username
+    AdminSummary:
+      type: object
+      properties:
+        total_users:
+          type: integer
+        connected_users:
+          type: integer
+        needs_reauth_users:
+          type: integer
+        posts_by_status:
+          type: object
+          additionalProperties:
+            type: integer
+        total_metrics:
+          type: object
+          additionalProperties:
+            type: integer
+        total_views:
+          type: integer
+        total_likes:
+          type: integer
+        total_comments:
+          type: integer
+        total_prizes:
+          type: integer
+        expiring_tokens_count:
+          type: integer
+        users_by_status:
+          type: object
+          additionalProperties:
+            type: integer
+        links_by_status:
+          type: object
+          additionalProperties:
+            type: integer
+        instagram_errors_last_hour:
+          type: object
+          additionalProperties:
+            type: integer
+        dry_run:
+          type: boolean
+          default: false
+      required:
+      - connected_users
+      - expiring_tokens_count
+      - links_by_status
+      - needs_reauth_users
+      - posts_by_status
+      - total_comments
+      - total_likes
+      - total_metrics
+      - total_prizes
+      - total_users
+      - total_views
+      - users_by_status
+    CustomTokenObtainPairRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
+      - username
+    DataDeletionRequest:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        confirmation_code:
+          type: string
+          readOnly: true
+        user_id:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/DataDeletionStatusEnum'
+          readOnly: true
+        requested_at:
+          type: string
+          format: date-time
+          readOnly: true
+        details:
+          type: string
+          readOnly: true
+          nullable: true
+      required:
+      - confirmation_code
+      - details
+      - id
+      - requested_at
+      - status
+      - user_id
+    DataDeletionStatusEnum:
+      enum:
+      - pending
+      - completed
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `completed` - Completed
+        * `failed` - Failed
+    HealthCheckOutput:
+      type: object
+      properties:
+        status:
+          type: string
+        database:
+          type: string
+        redis:
+          type: string
+        dry_run:
+          type: boolean
+      required:
+      - database
+      - dry_run
+      - redis
+      - status
+    InstagramUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          nullable: true
+        username:
+          type: string
+          readOnly: true
+          default: ''
+        name:
+          type: string
+          maxLength: 255
+        ig_user_id:
+          type: string
+          readOnly: true
+          nullable: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/InstagramUserStatusEnum'
+          readOnly: true
+        role:
+          type: string
+          readOnly: true
+        token_expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        has_token:
+          type: string
+          readOnly: true
+      required:
+      - created_at
+      - has_token
+      - id
+      - ig_user_id
+      - name
+      - role
+      - status
+      - token_expires_at
+      - username
+    InstagramUserRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+          nullable: true
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+      - name
+    InstagramUserStatusEnum:
+      enum:
+      - pending
+      - connected
+      - needs_reauth
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `connected` - Connected
+        * `needs_reauth` - Needs Reauth
+    KindEnum:
+      enum:
+      - prize
+      - system
+      type: string
+      description: |-
+        * `prize` - Prize
+        * `system` - System
+    MeSummary:
+      type: object
+      properties:
+        total_views:
+          type: integer
+          default: 0
+        total_likes:
+          type: integer
+          default: 0
+        total_comments:
+          type: integer
+          default: 0
+        posts_count:
+          type: integer
+          default: 0
+        prizes_count:
+          type: integer
+          default: 0
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+        next_milestone:
+          type: integer
+          nullable: true
+        views_remaining:
+          type: integer
+          nullable: true
+        progress_percent:
+          type: number
+          format: double
+          default: 0.0
+        milestones:
+          type: array
+          items:
+            type: integer
+      required:
+      - last_checked_at
+      - milestones
+      - next_milestone
+      - views_remaining
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/KindEnum'
+          readOnly: true
+        message:
+          type: string
+          readOnly: true
+        is_read:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        related_prize:
+          type: integer
+          readOnly: true
+          nullable: true
+      required:
+      - created_at
+      - id
+      - is_read
+      - kind
+      - message
+      - related_prize
+      - user
+    PaginatedDataDeletionRequestList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataDeletionRequest'
+    PaginatedInstagramUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstagramUser'
+    PaginatedNotificationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+    PaginatedPostList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Post'
+    PaginatedPostStatList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostStat'
+    PaginatedPrizeList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Prize'
+    PaginatedUniqueLinkList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/UniqueLink'
+    PaginatedVideoList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Video'
+    PatchedInstagramUserRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+          nullable: true
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+    PatchedUniqueLinkRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+        video:
+          type: integer
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    PatchedVideoRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        file:
+          type: string
+          format: binary
+        is_default:
+          type: boolean
+        owner:
+          type: integer
+          nullable: true
+        is_active:
+          type: boolean
+    Post:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        link:
+          type: integer
+          readOnly: true
+        user_name:
+          type: string
+          readOnly: true
+        permalink:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PostStatusEnum'
+          readOnly: true
+        posted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        deleted_detected_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        views:
+          type: integer
+          readOnly: true
+        likes:
+          type: integer
+          readOnly: true
+        comments_count:
+          type: integer
+          readOnly: true
+        last_checked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - comments_count
+      - deleted_detected_at
+      - id
+      - last_checked_at
+      - likes
+      - link
+      - permalink
+      - posted_at
+      - status
+      - user_name
+      - views
+    PostStat:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        post:
+          type: integer
+          readOnly: true
+        views:
+          type: integer
+          readOnly: true
+        likes:
+          type: integer
+          readOnly: true
+        comments_count:
+          type: integer
+          readOnly: true
+        checked_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - checked_at
+      - comments_count
+      - id
+      - likes
+      - post
+      - views
+    PostStatusEnum:
+      enum:
+      - queued
+      - publishing
+      - published
+      - deleted
+      - failed
+      type: string
+      description: |-
+        * `queued` - Queued
+        * `publishing` - Publishing
+        * `published` - Published
+        * `deleted` - Deleted
+        * `failed` - Failed
+    Prize:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        post:
+          type: integer
+          readOnly: true
+        user_name:
+          type: string
+          readOnly: true
+        milestone:
+          type: integer
+          readOnly: true
+        sent_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - id
+      - milestone
+      - post
+      - sent_at
+      - user_name
+    SimulatePostActionInputRequest:
+      type: object
+      properties:
+        post_id:
+          type: integer
+      required:
+      - post_id
+    SimulateUserActionInputRequest:
+      type: object
+      properties:
+        user_id:
+          type: integer
+      required:
+      - user_id
+    SimulateViewsInputRequest:
+      type: object
+      properties:
+        post_id:
+          type: integer
+        views:
+          type: integer
+          minimum: 0
+      required:
+      - post_id
+      - views
+    TokenBlacklistRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - refresh
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+      required:
+      - access
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - refresh
+    UniqueLink:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+        user_name:
+          type: string
+          readOnly: true
+        token:
+          type: string
+          format: uuid
+          readOnly: true
+        full_link:
+          type: string
+          readOnly: true
+        video:
+          type: integer
+          nullable: true
+        video_url:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/UniqueLinkStatusEnum'
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - full_link
+      - id
+      - status
+      - token
+      - user
+      - user_name
+      - video_url
+    UniqueLinkRequest:
+      type: object
+      properties:
+        user:
+          type: integer
+        video:
+          type: integer
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - user
+    UniqueLinkStatusEnum:
+      enum:
+      - pending
+      - opened
+      - posted
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `opened` - Opened
+        * `posted` - Posted
+        * `failed` - Failed
+    UserProfileOutput:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        is_staff:
+          type: boolean
+        role:
+          type: string
+        instagram_user:
+          allOf:
+          - $ref: '#/components/schemas/InstagramUser'
+          nullable: true
+        dry_run:
+          type: boolean
+          default: false
+      required:
+      - email
+      - id
+      - instagram_user
+      - is_staff
+      - role
+      - username
+    UserPublishStatusOutput:
+      type: object
+      properties:
+        has_post:
+          type: boolean
+        status:
+          type: string
+        post_id:
+          type: integer
+          nullable: true
+        posted_at:
+          type: string
+          format: date-time
+          nullable: true
+        views:
+          type: integer
+        likes:
+          type: integer
+        comments_count:
+          type: integer
+        permalink:
+          type: string
+          format: uri
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        retry_count:
+          type: integer
+        can_retry:
+          type: boolean
+          default: false
+        retries_left:
+          type: integer
+          default: 0
+        can_publish:
+          type: boolean
+          default: false
+        can_publish_reason:
+          type: string
+          nullable: true
+        upload_limits:
+          type: object
+          additionalProperties: {}
+      required:
+      - has_post
+      - status
+    Video:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        file:
+          type: string
+          format: uri
+        video_url:
+          type: string
+          readOnly: true
+        is_default:
+          type: boolean
+        owner:
+          type: integer
+          nullable: true
+        owner_name:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - file
+      - id
+      - owner_name
+      - title
+      - video_url
+    VideoRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        file:
+          type: string
+          format: binary
+        is_default:
+          type: boolean
+        owner:
+          type: integer
+          nullable: true
+        is_active:
+          type: boolean
+      required:
+      - file
+      - title
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
