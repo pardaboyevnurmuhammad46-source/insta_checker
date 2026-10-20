@@ -163,7 +163,7 @@ DRY_RUN_PUBLISH_DELAY_SECONDS=2
 Loyihada to'liq API testi, negativ ssenariylar va avtomatlashtirilgan E2E oqimi uchun Postman to'plami tayyorlangan.
 
 ### 1. Fayllar tuzilishi
-- `postman/insta_checker.postman_collection.json` — Postman Collection v2.1 (12 ta papka, 97 ta to'liq so'rov, barcha 47+ endpointlar va avtomatlashgan test skriptlari).
+- `postman/insta_checker.postman_collection.json` — Postman Collection v2.1 (12 ta papka, 103 ta to'liq so'rov, barcha 47+ endpointlar va avtomatlashgan test skriptlari).
 - `postman/local.postman_environment.json` — Environment o'zgaruvchilari to'liq shabloni.
 - `postman/files/sample.mp4` — Sinov uchun minimal MP4 video fayli.
 
@@ -189,7 +189,7 @@ Loyihada to'liq API testi, negativ ssenariylar va avtomatlashtirilgan E2E oqimi 
 > - `10 E2E – To'liq oqim / E2E 03 - Upload Video`
 
 ### 4. Newman orqali avtomatik E2E ishga tushirish (CI/CD)
-Hech qanday qo'lda fayl tanlamasdan, barcha 97 ta so'rov va to'liq testlarni Docker ichida to'liq avtomatik yurgizish:
+Hech qanday qo'lda fayl tanlamasdan, barcha 103 ta so'rov va to'liq testlarni Docker ichida to'liq avtomatik yurgizish:
 
 ```bash
 # Docker Compose orqali:

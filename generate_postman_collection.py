@@ -367,12 +367,25 @@ folder_02 = {
             ]
         ),
         make_req(
+            name="Reset Password (via /api/users/{id}/reset-password/)",
+            method="POST",
+            path="/api/users/{{new_user_id}}/reset-password/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            body={"new_password": "Yangi12345"},
+            description="Admin foydalanuvchi parolini ViewSet action (/api/users/{id}/reset-password/) orqali yangilaydi.",
+            tests=[
+                "pm.test('Parol muvaffaqiyatli tiklanishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
             name="Reset Password",
             method="POST",
             path="/api/admin/reset-password/",
             headers={"Authorization": "Bearer {{admin_access}}"},
             body={"user_id": "{{new_user_id}}", "new_password": "NewStrongPass999!_"},
-            description="Admin foydalanuvchi parolini yangilaydi.",
+            description="Admin foydalanuvchi parolini /api/admin/reset-password/ orqali yangilaydi.",
             tests=[
                 "pm.test('Parol muvaffaqiyatli tiklanishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
@@ -469,6 +482,19 @@ folder_03 = {
             description="Admin videoni barcha foydalanuvchilar uchun umumiy (default) qilib belgilaydi.",
             tests=[
                 "pm.test('Video default qilib belgilanishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Assign Video Owner",
+            method="POST",
+            path="/api/videos/{{video_id}}/assign-owner/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            body={"owner_id": "{{new_user_id}}"},
+            description="Admin videoni ma'lum bir foydalanuvchiga biriktiradi.",
+            tests=[
+                "pm.test('Video egasi muvaffaqiyatli biriktirildi (200)', function () {",
                 "    pm.response.to.have.status(200);",
                 "});"
             ]
@@ -1552,7 +1578,60 @@ folder_11 = {
             ]
         ),
         make_req(
-            name="03 User Access Other Post History -> 404/403",
+            name="02b Regular User Calls Users List -> 403",
+            method="GET",
+            path="/api/users/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            description="Oddiy user /api/users/ ro'yxatiga kira olmasligi kerak (403 Forbidden).",
+            tests=[
+                "pm.test('Oddiy user /api/users/ ga kira olmasligi kerak (403)', function () {",
+                "    pm.response.to.have.status(403);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="02c Regular User Uploads Video -> 403",
+            method="POST",
+            path="/api/videos/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            body=[
+                {"key": "title", "value": "User Video", "type": "text"},
+                {"key": "file", "type": "file", "src": "files/sample.mp4"}
+            ],
+            description="Oddiy user video yuklay olmasligi kerak (403 Forbidden).",
+            tests=[
+                "pm.test('Oddiy user video yuklay olmasligi kerak (403)', function () {",
+                "    pm.response.to.have.status(403);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="02d Regular User Calls Create User -> 403",
+            method="POST",
+            path="/api/admin/create-user/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            body={"username": "hacker", "password": "Password123!_", "name": "Hacker"},
+            description="Oddiy user yangi foydalanuvchi yarata olmasligi kerak (403 Forbidden).",
+            tests=[
+                "pm.test('Oddiy user create-user ga murojaat qila olmasligi kerak (403)', function () {",
+                "    pm.response.to.have.status(403);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="03 User Access Other Post Detail -> 404/403",
+            method="GET",
+            path="/api/posts/999999/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            description="Boshqa foydalanuvchining yoki mavjud bo'lmagan postini ko'rish rad etilishi kerak.",
+            tests=[
+                "pm.test('Boshqa user posti berilmasligi kerak (404 yoki 403)', function () {",
+                "    pm.expect([403, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="03b User Access Other Post History -> 404/403",
             method="GET",
             path="/api/me/posts/999999/history/",
             headers={"Authorization": "Bearer {{user_access}}"},

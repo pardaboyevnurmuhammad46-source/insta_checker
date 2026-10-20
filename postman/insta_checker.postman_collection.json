@@ -805,6 +805,56 @@
           "response": []
         },
         {
+          "name": "Reset Password (via /api/users/{id}/reset-password/)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Parol muvaffaqiyatli tiklanishi kerak (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_password\": \"Yangi12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/{{new_user_id}}/reset-password/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{new_user_id}}",
+                "reset-password",
+                ""
+              ]
+            },
+            "description": "Admin foydalanuvchi parolini ViewSet action (/api/users/{id}/reset-password/) orqali yangilaydi."
+          },
+          "response": []
+        },
+        {
           "name": "Reset Password",
           "event": [
             {
@@ -849,7 +899,7 @@
                 ""
               ]
             },
-            "description": "Admin foydalanuvchi parolini yangilaydi."
+            "description": "Admin foydalanuvchi parolini /api/admin/reset-password/ orqali yangilaydi."
           },
           "response": []
         },
@@ -1137,6 +1187,56 @@
               ]
             },
             "description": "Admin videoni barcha foydalanuvchilar uchun umumiy (default) qilib belgilaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Video Owner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Video egasi muvaffaqiyatli biriktirildi (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": \"{{new_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{video_id}}/assign-owner/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                "{{video_id}}",
+                "assign-owner",
+                ""
+              ]
+            },
+            "description": "Admin videoni ma'lum bir foydalanuvchiga biriktiradi."
           },
           "response": []
         },
@@ -4227,7 +4327,191 @@
           "response": []
         },
         {
-          "name": "03 User Access Other Post History -> 404/403",
+          "name": "02b Regular User Calls Users List -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Oddiy user /api/users/ ga kira olmasligi kerak (403)', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/users/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                ""
+              ]
+            },
+            "description": "Oddiy user /api/users/ ro'yxatiga kira olmasligi kerak (403 Forbidden)."
+          },
+          "response": []
+        },
+        {
+          "name": "02c Regular User Uploads Video -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Oddiy user video yuklay olmasligi kerak (403)', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "User Video",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "files/sample.mp4"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                ""
+              ]
+            },
+            "description": "Oddiy user video yuklay olmasligi kerak (403 Forbidden)."
+          },
+          "response": []
+        },
+        {
+          "name": "02d Regular User Calls Create User -> 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Oddiy user create-user ga murojaat qila olmasligi kerak (403)', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"hacker\",\n  \"password\": \"Password123!_\",\n  \"name\": \"Hacker\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/create-user/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "create-user",
+                ""
+              ]
+            },
+            "description": "Oddiy user yangi foydalanuvchi yarata olmasligi kerak (403 Forbidden)."
+          },
+          "response": []
+        },
+        {
+          "name": "03 User Access Other Post Detail -> 404/403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Boshqa user posti berilmasligi kerak (404 yoki 403)', function () {",
+                  "    pm.expect([403, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{user_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/posts/999999/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "999999",
+                ""
+              ]
+            },
+            "description": "Boshqa foydalanuvchining yoki mavjud bo'lmagan postini ko'rish rad etilishi kerak."
+          },
+          "response": []
+        },
+        {
+          "name": "03b User Access Other Post History -> 404/403",
           "event": [
             {
               "listen": "test",
