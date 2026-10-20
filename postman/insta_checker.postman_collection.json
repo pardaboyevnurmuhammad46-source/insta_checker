@@ -595,6 +595,11 @@
                 },
                 {
                   "key": "is_default",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "is_active",
                   "value": "true",
                   "type": "text"
                 },
@@ -2030,14 +2035,14 @@
           "response": []
         },
         {
-          "name": "E2E 03 - Upload Video & Make Default",
+          "name": "E2E 03 - Upload Video",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('E2E: Video yuklandi va default bo\\'ldi', function () {",
+                  "pm.test('E2E: Video yuklandi', function () {",
                   "    pm.response.to.have.status(201);",
                   "    var data = pm.response.json();",
                   "    pm.environment.set('e2e_video_id', data.id);",
@@ -2065,6 +2070,11 @@
                 },
                 {
                   "key": "is_default",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "is_active",
                   "value": "true",
                   "type": "text"
                 },
@@ -2086,7 +2096,49 @@
                 ""
               ]
             },
-            "description": "E2E: Admin video yuklaydi va default qiladi."
+            "description": "E2E: Admin yangi video yuklaydi."
+          },
+          "response": []
+        },
+        {
+          "name": "E2E 03b - Make Video Default",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('E2E: Video default qilindi', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{e2e_admin_access}}",
+                "type": "text"
+              }
+            ],
+            "body": null,
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{e2e_video_id}}/set-default/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "videos",
+                "{{e2e_video_id}}",
+                "set-default",
+                ""
+              ]
+            },
+            "description": "E2E: Yuklangan videoni barcha foydalanuvchilar uchun umumiy (default) qilish."
           },
           "response": []
         },
@@ -2277,14 +2329,16 @@
                   "var count = Number(pm.environment.get('poll_count') || 0);",
                   "if (data.status !== 'published' && count < 15) {",
                   "    pm.environment.set('poll_count', count + 1);",
-                  "    postman.setNextRequest('E2E 08 - Poll Publish Status');",
+                  "    var start = Date.now();",
+                  "    while (Date.now() - start < 500) {}",
+                  "    pm.execution.setNextRequest('E2E 08 - Poll Publish Status');",
                   "} else {",
                   "    pm.test('E2E: Post muvaffaqiyatli published bo\\'ldi', function () {",
                   "        pm.expect(data.status, 'post status published bo\\'lishi kerak').to.eql('published');",
                   "        pm.expect(data.permalink, 'permalink mavjud').to.be.a('string');",
                   "    });",
                   "    pm.environment.set('poll_count', 0);",
-                  "    postman.setNextRequest('E2E 09 - Simulate 500 Views');",
+                  "    pm.execution.setNextRequest('E2E 09 - Simulate 500 Views');",
                   "}"
                 ]
               }

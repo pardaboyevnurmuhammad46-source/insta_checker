@@ -306,7 +306,8 @@ folder_03 = {
             headers={"Authorization": "Bearer {{admin_access}}"},
             body=[
                 {"key": "title", "value": "Postman Test Video", "type": "text"},
-                {"key": "is_default", "value": "true", "type": "text"},
+                {"key": "is_default", "value": "false", "type": "text"},
+                {"key": "is_active", "value": "true", "type": "text"},
                 {"key": "file", "type": "file", "src": "files/sample.mp4"}
             ],
             description="Admin yangi video yuklaydi (multipart form-data orqali sample.mp4).",
@@ -841,21 +842,34 @@ folder_09 = {
             ]
         ),
         make_req(
-            name="E2E 03 - Upload Video & Make Default",
+            name="E2E 03 - Upload Video",
             method="POST",
             path="/api/videos/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
             body=[
                 {"key": "title", "value": "E2E Demo Video", "type": "text"},
-                {"key": "is_default", "value": "true", "type": "text"},
+                {"key": "is_default", "value": "false", "type": "text"},
+                {"key": "is_active", "value": "true", "type": "text"},
                 {"key": "file", "type": "file", "src": "files/sample.mp4"}
             ],
-            description="E2E: Admin video yuklaydi va default qiladi.",
+            description="E2E: Admin yangi video yuklaydi.",
             tests=[
-                "pm.test('E2E: Video yuklandi va default bo\\'ldi', function () {",
+                "pm.test('E2E: Video yuklandi', function () {",
                 "    pm.response.to.have.status(201);",
                 "    var data = pm.response.json();",
                 "    pm.environment.set('e2e_video_id', data.id);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="E2E 03b - Make Video Default",
+            method="POST",
+            path="/api/videos/{{e2e_video_id}}/set-default/",
+            headers={"Authorization": "Bearer {{e2e_admin_access}}"},
+            description="E2E: Yuklangan videoni barcha foydalanuvchilar uchun umumiy (default) qilish.",
+            tests=[
+                "pm.test('E2E: Video default qilindi', function () {",
+                "    pm.response.to.have.status(200);",
                 "});"
             ]
         ),
@@ -924,14 +938,16 @@ folder_09 = {
                 "var count = Number(pm.environment.get('poll_count') || 0);",
                 "if (data.status !== 'published' && count < 15) {",
                 "    pm.environment.set('poll_count', count + 1);",
-                "    postman.setNextRequest('E2E 08 - Poll Publish Status');",
+                "    var start = Date.now();",
+                "    while (Date.now() - start < 500) {}",
+                "    pm.execution.setNextRequest('E2E 08 - Poll Publish Status');",
                 "} else {",
                 "    pm.test('E2E: Post muvaffaqiyatli published bo\\'ldi', function () {",
                 "        pm.expect(data.status, 'post status published bo\\'lishi kerak').to.eql('published');",
                 "        pm.expect(data.permalink, 'permalink mavjud').to.be.a('string');",
                 "    });",
                 "    pm.environment.set('poll_count', 0);",
-                "    postman.setNextRequest('E2E 09 - Simulate 500 Views');",
+                "    pm.execution.setNextRequest('E2E 09 - Simulate 500 Views');",
                 "}"
             ]
         ),

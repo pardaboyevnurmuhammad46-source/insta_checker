@@ -155,3 +155,48 @@ DRY_RUN_PUBLISH_DELAY_SECONDS=2
 7. **Vaqtinchalik tarmoq xatosini simulyatsiya qilish**:
    - `POST /api/dev/simulate-network-error/` (`{"post_id": 1}`)
    - Post o'chirilmaydi va navbatdagi tekshiruv keyinroqqa qoldiriladi.
+
+---
+
+## 📮 Postman bilan sinash (Newman E2E)
+
+Loyihada to'liq API testi, negativ ssenariylar va avtomatlashtirilgan E2E oqimi uchun Postman to'plami tayyorlangan.
+
+### 1. Fayllar tuzilishi
+- `postman/insta_checker.postman_collection.json` — Postman Collection v2.1 (11 ta papka, 66+ so'rov, to'liq test skriptlari).
+- `postman/local.postman_environment.json` — Environment o'zgaruvchilari shabloni.
+- `postman/files/sample.mp4` — Sinov uchun minimal MP4 video fayli.
+
+### 2. Postman dasturiga import qilish
+1. **Kolleksiyani yuklash**: Postman ilovasida `Import` tugmasini bosing va `postman/insta_checker.postman_collection.json` faylini tanlang.
+2. **Muhitni yuklash**: `postman/local.postman_environment.json` faylini `Environments` bo'limiga import qiling.
+3. **OpenAPI Sxemani import qilish**:
+   - Postman ilovasida: `File` → `Import` → `Link`.
+   - Manzil: `http://localhost:8080/api/schema/` (yoki `http://127.0.0.1:8000/api/schema/`).
+   - Bu orqali API spetsifikatsiyasi to'g'ridan-to'g'ri Postman'da paydo bo'ladi.
+
+### 3. Environment o'zgaruvchilarini to'ldirish
+`Local (InstaChecker)` muhitini tanlang va quyidagi qiymatlarni kiriting:
+- `base_url`: `http://localhost:8080` (yoki `http://localhost:8000`)
+- `admin_username`: administrator foydalanuvchi nomi (masalan: `admin`)
+- `admin_password`: administrator paroli (masalan: `admin123`)
+- `user_username`: oddiy foydalanuvchi nomi (masalan: `bekzod`)
+- `user_password`: oddiy foydalanuvchi paroli (masalan: `user123`)
+
+> ⚠️ **Muhim eslatma (Postman UI da fayl tanlash)**:
+> Postman desktop ilovasi xavfsizlik nuqtai nazaridan import qilingan kolleksiyalardagi mahalliy fayl yo'llarini avtomatik tanlamaydi. Shuning uchun Postman UI dan foydalanganda quyidagi so'rovlarning `Body` (form-data) bo'limida `file` maydoniga `postman/files/sample.mp4` faylini qo'lda biriktirishingiz kerak:
+> - `03 Admin – Videolar / Upload Video (Multipart)`
+> - `09 E2E – To'liq oqim / E2E 03 - Upload Video`
+
+### 4. Newman orqali avtomatik E2E ishga tushirish (CI/CD)
+Hech qanday qo'lda fayl tanlamasdan, barcha 66+ ta so'rov va 67+ ta testlarni Docker ichida to'liq avtomatik yurgizish:
+
+```bash
+# Docker Compose orqali:
+docker compose --profile e2e run --rm newman
+
+# yoki Makefile orqali:
+make e2e
+```
+
+**Talab**: E2E testi faqat `INSTAGRAM_DRY_RUN=True` bo'lganda ishlaydi. Agar ushbu rejim yoqilmagan bo'lsa, test dastlabki `00 Health` bosqichidayoq aniq ogohlantirish bilan to'xtaydi.
