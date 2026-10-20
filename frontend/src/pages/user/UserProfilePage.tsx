@@ -42,7 +42,7 @@ export const UserProfilePage: React.FC = () => {
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Parolni oʻzgartirishda xatolik yuz berdi', 'error');
+      showToast(err.detail || 'Parolni oʻzgartirishda xatolik yuz berdi', 'error');
     } finally {
       setSubmitting(false);
     }

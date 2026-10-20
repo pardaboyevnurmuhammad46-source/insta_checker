@@ -89,7 +89,7 @@ export const UserVideoPage: React.FC = () => {
         window.location.href = res.data.auth_url;
       }
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Ulanish manzilini olib boʻlmadi', 'error');
+      showToast(err.detail || 'Ulanish manzilini olib boʻlmadi', 'error');
     } finally {
       setConnecting(false);
     }
@@ -111,7 +111,7 @@ export const UserVideoPage: React.FC = () => {
         status: 'queued',
       });
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Videoni joylashda xatolik', 'error');
+      showToast(err.detail || 'Videoni joylashda xatolik', 'error');
     } finally {
       setPublishing(false);
     }
@@ -124,7 +124,7 @@ export const UserVideoPage: React.FC = () => {
       showToast(res.data.message || 'Qayta urinish navbatga qoʻyildi', 'success');
       setPublishStatus((prev) => (prev ? { ...prev, status: 'queued', error: null } : null));
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Qayta urinishda xatolik', 'error');
+      showToast(err.detail || 'Qayta urinishda xatolik', 'error');
     } finally {
       setRetrying(false);
     }
@@ -279,33 +279,46 @@ export const UserVideoPage: React.FC = () => {
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
             {publishStatus?.status === 'failed' && publishStatus.can_retry && (
-              <button
-                onClick={handleRetry}
-                disabled={retrying}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-50"
-              >
-                {retrying ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
-                <span>Qayta urinish</span>
-              </button>
+              <div className="flex flex-col items-center sm:items-end">
+                <button
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-50"
+                >
+                  {retrying ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+                  <span>Qayta urinish</span>
+                </button>
+                <span className="text-xs text-amber-500/80 mt-1">
+                  Qolgan urinishlar: {publishStatus.retries_left}
+                </span>
+              </div>
             )}
 
-            <button
-              onClick={handlePublish}
-              disabled={publishing || isPublishingNow || !isConnected}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {publishing || isPublishingNow ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Jarayonda...</span>
-                </>
-              ) : (
-                <>
-                  <Send size={16} />
-                  <span>Instagramga joylash</span>
-                </>
+            <div className="flex flex-col items-center sm:items-end">
+              <button
+                onClick={handlePublish}
+                disabled={publishing || isPublishingNow || !isConnected || !publishStatus?.can_publish}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                title={publishStatus?.can_publish_reason || ''}
+              >
+                {publishing || isPublishingNow ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Jarayonda...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send size={16} />
+                    <span>Instagramga joylash</span>
+                  </>
+                )}
+              </button>
+              {publishStatus?.can_publish_reason && !publishStatus.can_publish && (
+                <span className="text-xs text-rose-400 mt-1 max-w-[250px] text-center sm:text-right">
+                  {publishStatus.can_publish_reason}
+                </span>
               )}
-            </button>
+            </div>
           </div>
         </div>
       </div>

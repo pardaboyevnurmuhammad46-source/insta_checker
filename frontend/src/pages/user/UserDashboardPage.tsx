@@ -24,8 +24,6 @@ import {
   CartesianGrid,
 } from 'recharts';
 
-const MILESTONES = [500, 1000, 5000, 10000, 50000, 100000];
-
 export const UserDashboardPage: React.FC = () => {
   const [summary, setSummary] = useState<UserSummary | null>(null);
   const [recentPosts, setRecentPosts] = useState<Post[]>([]);
@@ -44,7 +42,7 @@ export const UserDashboardPage: React.FC = () => {
         setSummary(sumRes.data);
         setRecentPosts(postsRes.data.results || []);
       } catch (err: any) {
-        setError(err.message || 'Maʼlumotlarni yuklashda xatolik yuz berdi');
+        setError(err.detail || 'Maʼlumotlarni yuklashda xatolik yuz berdi');
       } finally {
         setLoading(false);
       }
@@ -81,15 +79,10 @@ export const UserDashboardPage: React.FC = () => {
     );
   }
 
-  // Next milestone calculation
-  const totalViews = summary.total_views || 0;
-  const nextMilestone = MILESTONES.find((m) => m > totalViews) || MILESTONES[MILESTONES.length - 1];
-  const prevMilestone = [...MILESTONES].reverse().find((m) => m <= totalViews) || 0;
-  const progressPercent = Math.min(
-    100,
-    Math.round(((totalViews - prevMilestone) / (nextMilestone - prevMilestone)) * 100)
-  );
-  const viewsRemaining = Math.max(0, nextMilestone - totalViews);
+  // Backend'dan olingan ma'lumotlar
+  const progressPercent = summary.progress_percent || 0;
+  const viewsRemaining = summary.views_remaining || 0;
+  const nextMilestone = summary.next_milestone || 0;
 
   // Chart data from recent posts
   const chartData = [...recentPosts]

@@ -11,7 +11,8 @@ from django.utils import timezone
 from django.db.models import Count, Sum, Max, Min
 from django.db.models.functions import Coalesce, TruncDate
 from datetime import timedelta
-from rest_framework import status, viewsets
+from drf_spectacular.utils import extend_schema
+from rest_framework import status, viewsets, serializers
 from rest_framework.decorators import api_view, action, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -39,16 +40,28 @@ from .serializers import (
     VideoSerializer,
     UniqueLinkSerializer,
     PostSerializer,
+    AdminPostSerializer,
     PrizeSerializer,
     DataDeletionRequestSerializer,
     PostStatSerializer,
     NotificationSerializer,
     AdminCreateUserSerializer,
+    AdminCreateUserOutputSerializer,
     ChangePasswordSerializer,
     ResetPasswordSerializer,
+    MeSummarySerializer,
+    AdminSummarySerializer,
+    UserProfileOutputSerializer,
+    UserPublishStatusOutputSerializer,
 )
 from .services import (
     InstagramOAuthError,
+    InstagramNetworkError,
+    InstagramPublishError,
+    InstagramPublishNetworkError,
+    InstagramMetricsError,
+    InstagramRateLimitError,
+    InstagramMetricsNetworkError,
     MetaWebhookError,
     build_instagram_auth_url,
     complete_instagram_oauth,
@@ -56,8 +69,10 @@ from .services import (
     handle_deauthorize_request,
     handle_data_deletion_request,
     refresh_user_token,
+    get_configured_milestones,
 )
 from .tasks import publish_reels_task, check_post_metrics_task
+from .instagram_errors import get_instagram_errors_last_hour
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +203,17 @@ class UniqueLinkViewSet(viewsets.ModelViewSet):
             return UniqueLink.objects.select_related('user').all().order_by('-id')
         return UniqueLink.objects.select_related('user').filter(user__user=user).order_by('-id')
 
+    def perform_create(self, serializer):
+        user = self.request.user
+        if not (user.is_staff or user.is_superuser):
+            try:
+                ig_user = InstagramUser.objects.get(user=user)
+                serializer.save(user=ig_user)
+            except InstagramUser.DoesNotExist:
+                raise serializers.ValidationError({"user": "Foydalanuvchida bog'langan Instagram akkaunt topilmadi."})
+        else:
+            serializer.save()
+
     @action(detail=True, methods=['post'], url_path='resend')
     def resend(self, request, pk=None):
         link = self.get_object()
@@ -203,7 +229,6 @@ class UniqueLinkViewSet(viewsets.ModelViewSet):
 class PostViewSet(viewsets.ReadOnlyModelViewSet):
     # queryset = Post.objects.select_related('link__user').all()
     queryset = Post.objects.select_related('link__user').all().order_by('-id')
-    serializer_class = PostSerializer
     pagination_class = StandardResultsSetPagination
     permission_classes = [IsOwnerOrAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -212,6 +237,12 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
     # ordering_fields = ['views', 'posted_at']
     ordering_fields = ['views', 'posted_at', 'id']
     ordering = ['-id']
+
+    def get_serializer_class(self):
+        user = self.request.user
+        if user and user.is_authenticated and (user.is_staff or user.is_superuser):
+            return AdminPostSerializer
+        return PostSerializer
 
     def get_queryset(self):
         user = self.request.user
@@ -327,6 +358,7 @@ class Echo:
         return value
 
 
+@extend_schema(responses={200: AdminSummarySerializer})
 @api_view(['GET'])
 # @permission_classes([IsAdminUser])
 @permission_classes([IsAdminRole])
@@ -336,7 +368,9 @@ def admin_summary(request):
     """
     cached_data = cache.get('admin_summary_cache')
     if cached_data is not None:
-        return Response(cached_data)
+        cached_data["instagram_errors_last_hour"] = get_instagram_errors_last_hour()
+        cached_data["dry_run"] = bool(getattr(settings, 'INSTAGRAM_DRY_RUN', False))
+        return Response(AdminSummarySerializer(cached_data).data)
 
     total_users = InstagramUser.objects.count()
     connected_users = InstagramUser.objects.filter(status='connected').count()
@@ -365,12 +399,18 @@ def admin_summary(request):
     users_by_status = InstagramUser.objects.values('status').annotate(count=Count('id'))
     links_by_status = UniqueLink.objects.values('status').annotate(count=Count('id'))
 
+    errors_last_hour = get_instagram_errors_last_hour()
+
     data = {
         "total_users": total_users,
         "connected_users": connected_users,
         "needs_reauth_users": needs_reauth_users,
         "posts_by_status": status_counts,
-        "total_metrics": total_metrics,
+        "total_metrics": {
+            "total_views": total_metrics['total_views'],
+            "total_likes": total_metrics['total_likes'],
+            "total_comments": total_metrics['total_comments'],
+        },
         "total_views": total_metrics['total_views'],
         "total_likes": total_metrics['total_likes'],
         "total_comments": total_metrics['total_comments'],
@@ -379,10 +419,12 @@ def admin_summary(request):
         # dashboard_stats mosligi uchun:
         "users_by_status": {item['status']: item['count'] for item in users_by_status},
         "links_by_status": {item['status']: item['count'] for item in links_by_status},
+        "instagram_errors_last_hour": errors_last_hour,
+        "dry_run": bool(getattr(settings, 'INSTAGRAM_DRY_RUN', False)),
     }
 
     cache.set('admin_summary_cache', data, timeout=60)
-    return Response(data)
+    return Response(AdminSummarySerializer(data).data)
 
 dashboard_stats = admin_summary
 
@@ -391,24 +433,33 @@ dashboard_stats = admin_summary
 # User Statistika API lari (/api/me/...)
 # ==========================================
 
+@extend_schema(responses={200: MeSummarySerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me_summary(request):
     """
     Faqat joriy foydalanuvchining o'z statistikasi:
     jami views, like, comment, postlar soni, prizlar soni, oxirgi tekshiruv vaqti.
+    BOSQICH A: progress va milestone ma'lumotlari bilan qaytadi.
     """
     user = request.user
     ig_user = getattr(user, 'instagram_user', None)
+    milestones = get_configured_milestones()
+    
     if not ig_user:
-        return Response({
+        data = {
             "total_views": 0,
             "total_likes": 0,
             "total_comments": 0,
             "posts_count": 0,
             "prizes_count": 0,
             "last_checked_at": None,
-        })
+            "next_milestone": milestones[0] if milestones else None,
+            "views_remaining": milestones[0] if milestones else None,
+            "progress_percent": 0.0,
+            "milestones": milestones,
+        }
+        return Response(MeSummarySerializer(data).data)
 
     posts_qs = Post.objects.filter(link__user=ig_user)
     metrics = posts_qs.aggregate(
@@ -418,17 +469,40 @@ def me_summary(request):
         last_checked_at=Max('last_checked_at'),
     )
 
+    total_views = metrics['total_views']
+    
+    next_milestone = None
+    prev_milestone = 0
+    for m in sorted(milestones):
+        if total_views < m:
+            next_milestone = m
+            break
+        prev_milestone = m
+
+    views_remaining = (next_milestone - total_views) if next_milestone else 0
+    progress_percent = 100.0
+    if next_milestone:
+        range_size = next_milestone - prev_milestone
+        current_in_range = total_views - prev_milestone
+        progress_percent = min(100.0, max(0.0, (current_in_range / range_size) * 100.0)) if range_size > 0 else 0.0
+
     posts_count = posts_qs.count()
     prizes_count = Prize.objects.filter(post__link__user=ig_user).count()
 
-    return Response({
-        "total_views": metrics['total_views'],
+    data = {
+        "total_views": total_views,
         "total_likes": metrics['total_likes'],
         "total_comments": metrics['total_comments'],
         "posts_count": posts_count,
         "prizes_count": prizes_count,
         "last_checked_at": metrics['last_checked_at'],
-    })
+        "next_milestone": next_milestone,
+        "views_remaining": views_remaining,
+        "progress_percent": progress_percent,
+        "milestones": milestones,
+    }
+
+    return Response(MeSummarySerializer(data).data)
 
 
 @api_view(['GET'])
@@ -616,7 +690,26 @@ def admin_user_detail(request, user_id):
 
     posts = Post.objects.filter(link__user=u).order_by('-id').prefetch_related('stats')
     posts_data = []
+    all_history = []
+    
     for p in posts:
+        history_list = []
+        for s in p.stats.all():
+            hist_item = {
+                "checked_at": s.checked_at,
+                "views": s.views,
+                "likes": s.likes,
+                "comments_count": s.comments_count,
+            }
+            history_list.append(hist_item)
+            
+            all_history.append({
+                "checked_at": s.checked_at,
+                "views": s.views,
+                "likes": s.likes,
+                "timestamp": s.checked_at.timestamp() * 1000
+            })
+            
         posts_data.append({
             "id": p.id,
             "status": p.status,
@@ -626,15 +719,19 @@ def admin_user_detail(request, user_id):
             "comments_count": p.comments_count,
             "posted_at": p.posted_at,
             "deleted_detected_at": p.deleted_detected_at,
-            "history": [
-                {
-                    "checked_at": s.checked_at,
-                    "views": s.views,
-                    "likes": s.likes,
-                    "comments_count": s.comments_count,
-                }
-                for s in p.stats.all()
-            ]
+            "history": history_list
+        })
+        
+    # Tarixni vaqt bo'yicha o'sish tartibida saralash (chart uchun)
+    all_history.sort(key=lambda x: x["timestamp"])
+    # Front-end kutilayotgan formatga o'tkazish
+    formatted_history = []
+    for h in all_history:
+        formatted_history.append({
+            "time": h["checked_at"].strftime('%d %b %H:%M') if h["checked_at"] else "",
+            "timestamp": h["timestamp"],
+            "views": h["views"],
+            "likes": h["likes"]
         })
 
     return Response({
@@ -650,6 +747,7 @@ def admin_user_detail(request, user_id):
         "last_posted_at": u.last_posted_at,
         "created_at": u.created_at,
         "posts": posts_data,
+        "all_history": formatted_history
     })
 
 
@@ -770,6 +868,7 @@ def admin_export_posts_csv(request):
     return response
 
 
+@extend_schema(responses={200: UserProfileOutputSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def current_user_profile(request):
@@ -777,18 +876,21 @@ def current_user_profile(request):
     Joriy tizimga kirgan foydalanuvchi ma'lumotlari va roli (/api/me/).
     """
     user = request.user
-    role = "admin" if (user.is_staff or user.is_superuser) else "user"
     ig_profile = getattr(user, 'instagram_user', None)
-    return Response({
+    
+    data = {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "is_staff": user.is_staff,
-        "role": role,
-        "instagram_user": InstagramUserSerializer(ig_profile).data if ig_profile else None
-    })
+        "role": "admin" if (user.is_staff or user.is_superuser) else "user",
+        "instagram_user": ig_profile,
+        "dry_run": bool(getattr(settings, 'INSTAGRAM_DRY_RUN', False)),
+    }
+    return Response(UserProfileOutputSerializer(data).data)
 
 
+@extend_schema(request=AdminCreateUserSerializer, responses={201: AdminCreateUserOutputSerializer, 400: dict})
 @api_view(['POST'])
 @permission_classes([IsAdminRole])
 def admin_create_user(request):
@@ -797,8 +899,9 @@ def admin_create_user(request):
     """
     serializer = AdminCreateUserSerializer(data=request.data)
     if serializer.is_valid():
-        result = serializer.save()
-        return Response(result, status=status.HTTP_201_CREATED)
+        ig_user = serializer.save()
+        output = AdminCreateUserOutputSerializer(ig_user).data
+        return Response(output, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -907,21 +1010,54 @@ def user_publish_video(request):
     }, status=status.HTTP_202_ACCEPTED)
 
 
+@extend_schema(responses={200: UserPublishStatusOutputSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_publish_status(request):
     """
     Foydalanuvchi o'zining so'nggi post holatini (polling) tekshiradi.
+    BOSQICH A: can_publish, can_publish_reason, can_retry, retries_left, upload_limits maydonlari qo'shiladi.
     """
     ig_user = getattr(request.user, 'instagram_user', None)
-    if not ig_user:
-        return Response({"has_post": False, "status": "none"})
+    
+    upload_limits = {
+        "max_size_mb": getattr(settings, 'MAX_VIDEO_SIZE_MB', 100),
+        "allowed_types": [".mp4"]
+    }
+
+    base_response = {
+        "upload_limits": upload_limits,
+        "can_publish": False,
+        "can_publish_reason": None,
+        "can_retry": False,
+        "retries_left": 0,
+        "has_post": False,
+        "status": "none",
+    }
+
+    if not ig_user or ig_user.status != 'connected':
+        base_response["can_publish_reason"] = "Instagram hisob ulanmagan."
+        return Response(UserPublishStatusOutputSerializer(base_response).data)
 
     post = Post.objects.filter(link__user=ig_user).order_by('-id').first()
+    
     if not post:
-        return Response({"has_post": False, "status": "none"})
+        base_response["can_publish"] = True
+        return Response(UserPublishStatusOutputSerializer(base_response).data)
 
-    return Response({
+    retries_left = max(0, 3 - post.retry_count)
+    can_retry = post.status == 'failed' and retries_left > 0
+    
+    can_publish = False
+    can_publish_reason = None
+    
+    if post.status in ['queued', 'publishing']:
+        can_publish_reason = "Jarayonda bo'lgan post mavjud."
+    else:
+        can_publish = True
+
+    response_data = {
+        **base_response,
         "has_post": True,
         "post_id": post.id,
         "status": post.status,
@@ -932,8 +1068,13 @@ def user_publish_status(request):
         "permalink": post.permalink,
         "error": post.error,
         "retry_count": post.retry_count,
-        "can_retry": post.status == 'failed' and post.retry_count < 3
-    })
+        "can_retry": can_retry,
+        "retries_left": retries_left,
+        "can_publish": can_publish,
+        "can_publish_reason": can_publish_reason,
+    }
+
+    return Response(UserPublishStatusOutputSerializer(response_data).data)
 
 
 @api_view(['POST'])

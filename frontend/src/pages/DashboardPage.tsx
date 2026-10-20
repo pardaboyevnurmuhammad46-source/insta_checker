@@ -228,6 +228,62 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Instagram API Error Types (Last 1 Hour) */}
+      {stats.instagram_errors_last_hour && (
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="text-rose-500" size={20} />
+              <h2 className="text-base font-bold text-slate-900">
+                Instagram API Xatoliklari (Oxirgi 1 soat)
+              </h2>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full">
+              Jami: {stats.instagram_errors_last_hour.total}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs text-slate-500 block truncate" title="Media o'chirilgan">O'chirilgan (404/100)</span>
+              <span className="text-lg font-bold text-slate-800">
+                {stats.instagram_errors_last_hour.media_not_found}
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs text-slate-500 block truncate" title="Token yaroqsiz (190/102)">Token Yaroqsiz</span>
+              <span className="text-lg font-bold text-amber-600">
+                {stats.instagram_errors_last_hour.token_invalid}
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs text-slate-500 block truncate" title="Ruxsat yetishmaydi (10/403)">Ruxsat Yetishmaydi</span>
+              <span className="text-lg font-bold text-purple-600">
+                {stats.instagram_errors_last_hour.permission_denied}
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs text-slate-500 block truncate" title="Rate limit (4/17/613/429)">Rate Limit / Throttle</span>
+              <span className="text-lg font-bold text-rose-600">
+                {stats.instagram_errors_last_hour.rate_limit}
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs text-slate-500 block truncate" title="Server xatosi (5xx/1/2)">Server Xatosi</span>
+              <span className="text-lg font-bold text-orange-600">
+                {stats.instagram_errors_last_hour.server_error}
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <span className="text-xs text-slate-500 block truncate" title="Boshqa xatolar">Boshqa</span>
+              <span className="text-lg font-bold text-slate-600">
+                {stats.instagram_errors_last_hour.other}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

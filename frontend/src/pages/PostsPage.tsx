@@ -46,7 +46,7 @@ export const PostsPage: React.FC = () => {
       const res = await apiClient.post(`/api/posts/${postId}/check-metrics/`);
       showToast(res.data.message || 'Statistikani tekshirish navbatga qoʻyildi', 'success');
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Xatolik yuz berdi', 'error');
+      showToast(err.detail || 'Xatolik yuz berdi', 'error');
     } finally {
       setCheckingMetricsId(null);
     }
@@ -59,7 +59,7 @@ export const PostsPage: React.FC = () => {
       showToast(res.data.message || 'Post qayta navbatga qoʻyildi', 'success');
       fetchPosts();
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Qayta urinishda xatolik', 'error');
+      showToast(err.detail || 'Qayta urinishda xatolik', 'error');
     } finally {
       setRetryingId(null);
     }

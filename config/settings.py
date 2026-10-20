@@ -48,8 +48,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
+    'drf_spectacular',
     'tracker.apps.TrackerConfig',
 ]
 
@@ -174,6 +176,8 @@ CACHES = {
 
 # REST Framework
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'EXCEPTION_HANDLER': 'config.exceptions.custom_exception_handler',
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAdminUser',
     ],
@@ -238,10 +242,24 @@ PRIZE_MILESTONES = [int(m.strip()) for m in raw_milestones.split(',') if m.strip
 MAX_VIDEO_SIZE_MB = int(os.getenv('MAX_VIDEO_SIZE_MB', '100'))
 MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
 
-# API Rate Limiting for Celery
-INSTAGRAM_API_RATE_LIMIT = int(os.getenv('INSTAGRAM_API_RATE_LIMIT', '50')) # requests per second
+# API Rate Limiting for Instagram
+INSTAGRAM_API_RATE_LIMIT = int(os.getenv('INSTAGRAM_API_RATE_LIMIT', '50')) # requests per second (global)
+INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC', '5')) # per account per second
+INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR', '200')) # per account per hour
 CHECK_BATCH_SIZE = int(os.getenv('CHECK_BATCH_SIZE', '1000'))
 MAX_POSTS_PER_RUN = int(os.getenv('MAX_POSTS_PER_RUN', '50000'))
+
+# Instagram DRY_RUN rejimi (Instagram'siz sinash va simulyatsiya)
+INSTAGRAM_DRY_RUN = os.getenv('INSTAGRAM_DRY_RUN', 'False').lower() in ('true', '1', 't', 'yes')
+DRY_RUN_PUBLISH_DELAY_SECONDS = float(os.getenv('DRY_RUN_PUBLISH_DELAY_SECONDS', '2.0'))
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'InstaChecker API',
+    'DESCRIPTION': 'Instagram Reels Tracker & Prize System API',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+}
 
 
 

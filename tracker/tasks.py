@@ -1,16 +1,19 @@
 import logging
+import math
 from datetime import timedelta
 from celery import shared_task
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from .models import InstagramUser, Post
+from .models import Post, InstagramUser
+from .rate_limiter import rate_limiter
 from .services import (
     publish_reels_for_link,
     update_post_metrics,
     refresh_user_token,
     InstagramPublishError,
     InstagramMetricsError,
+    InstagramRateLimitError,
     InstagramNetworkError,
 )
 
@@ -36,14 +39,37 @@ def publish_reels_task(self, link_id: int, caption: str = ''):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=2, default_retry_delay=60, rate_limit=f"{getattr(settings, 'INSTAGRAM_API_RATE_LIMIT', 50)}/s")
+@shared_task(bind=True, max_retries=5, default_retry_delay=60)
 def check_post_metrics_task(self, post_id: int):
     """
     Bitta post uchun Instagram metrikalarini (views, likes, comments) yangilaydi.
+    So'rov yuborishdan oldin Redis umumiy tezlik cheklagichidan ruxsat oladi.
     """
     logger.info("Post statistikasini tekshirish boshlandi: post_id=%s", post_id)
     try:
         post = Post.objects.select_related('link__user').get(id=post_id)
+    except Post.DoesNotExist:
+        logger.warning("Post topilmadi: post_id=%s", post_id)
+        return {"error": f"Post #{post_id} topilmadi"}
+
+    # Akkaunt ID (agar bog'langan bo'lsa)
+    account_id = None
+    if post.link and post.link.user_id:
+        account_id = post.link.user_id
+
+    # 1. Tezlik cheklagichdan ruxsat so'rash (barcha workerlar uchun umumiy)
+    allowed, retry_after, reason = rate_limiter.acquire(account_id=account_id)
+    if not allowed:
+        logger.info(
+            "Rate limit cheklovi (%s): post_id=%s, account_id=%s uchun %.2fs kutiladi",
+            reason, post_id, account_id, retry_after
+        )
+        countdown = max(1, int(math.ceil(retry_after)))
+        # Ruxsat bo'lmasa, vazifa xato hisoblanmasin va post statusi o'zgarmasin:
+        # qisqa kechiktirib qayta navbatga qo'yilsin
+        raise self.retry(countdown=countdown, max_retries=None)
+
+    try:
         updated_post = update_post_metrics(post)
         logger.info(
             "Post statistikasi yangilandi: post_id=%s, views=%s, likes=%s, comments=%s, status=%s",
@@ -60,9 +86,14 @@ def check_post_metrics_task(self, post_id: int):
             "comments_count": updated_post.comments_count,
             "status": updated_post.status,
         }
-    except Post.DoesNotExist:
-        logger.warning("Post topilmadi: post_id=%s", post_id)
-        return {"error": f"Post #{post_id} topilmadi"}
+    except InstagramRateLimitError as exc:
+        # Instagram'dan rate limit xatosi: post o'chirilmasin, xato deb belgilanmasin
+        rate_limiter.trigger_backoff(duration_seconds=60)
+        logger.warning(
+            "Instagram rate limit xatosi (post_id=%s): vazifa 60 soniyaga kechiktirildi",
+            post_id,
+        )
+        raise self.retry(countdown=60, max_retries=None)
     except InstagramMetricsError as exc:
         logger.warning("Post statistikasini olishda xatolik (post_id=%s): %s", post_id, exc)
         if isinstance(exc, InstagramNetworkError):

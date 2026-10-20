@@ -80,7 +80,7 @@ export const AdminPostsPage: React.FC = () => {
       showToast(res.data.message || 'Statistikani tekshirish navbatga qoʻyildi', 'success');
       fetchPosts();
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Xatolik yuz berdi', 'error');
+      showToast(err.detail || 'Xatolik yuz berdi', 'error');
     } finally {
       setCheckingMetricsId(null);
     }
@@ -93,7 +93,7 @@ export const AdminPostsPage: React.FC = () => {
       showToast(res.data.message || 'Post qayta joylash uchun navbatga qoʻyildi', 'success');
       fetchPosts();
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Qayta urinishda xatolik', 'error');
+      showToast(err.detail || 'Qayta urinishda xatolik', 'error');
     } finally {
       setRetryingId(null);
     }

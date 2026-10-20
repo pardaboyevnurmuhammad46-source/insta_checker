@@ -40,6 +40,14 @@ from .views import (
     me_prizes,
 )
 
+from .dev_views import (
+    health_check,
+    simulate_views,
+    simulate_delete,
+    simulate_token_revoked,
+    simulate_network_error,
+)
+
 router = DefaultRouter()
 router.register(r'users', InstagramUserViewSet)
 router.register(r'videos', VideoViewSet)
@@ -76,6 +84,12 @@ urlpatterns = [
     path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
     path('api/change-password/', change_password, name='change_password'),
     path('api/public/post/<uuid:token>/', user_portal_api, name='user_portal_api'),
+    path('api/health/', health_check, name='health_check'),
+    # Dev / Simulation endpoints (faol faqat INSTAGRAM_DRY_RUN=True va admin bo'lganda)
+    path('api/dev/simulate-views/', simulate_views, name='simulate_views'),
+    path('api/dev/simulate-delete/', simulate_delete, name='simulate_delete'),
+    path('api/dev/simulate-token-revoked/', simulate_token_revoked, name='simulate_token_revoked'),
+    path('api/dev/simulate-network-error/', simulate_network_error, name='simulate_network_error'),
     path('api/', include(router.urls)),
     path('link/', link_info, name='link_info'),
     path('link/<uuid:token>/', redirect_to_instagram, name='user_redirect'),

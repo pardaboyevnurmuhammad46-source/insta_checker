@@ -70,7 +70,7 @@ export const UsersPage: React.FC = () => {
       showToast(response.data.message || 'Token yangilandi', 'success');
       fetchUsers();
     } catch (err: any) {
-      const msg = err.response?.data?.error || 'Tokenni yangilab boʻlmadi';
+      const msg = err.detail || 'Tokenni yangilab boʻlmadi';
       showToast(msg, 'error');
     } finally {
       setRefreshingId(null);

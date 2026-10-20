@@ -94,7 +94,7 @@ export const AdminUsersPage: React.FC = () => {
       setCreateIsStaff(false);
       fetchUsers();
     } catch (err: any) {
-      showToast(err.response?.data?.username?.[0] || 'Foydalanuvchi yaratishda xatolik', 'error');
+      showToast(err.errors?.username?.[0] || err.detail || 'Foydalanuvchi yaratishda xatolik', 'error');
     } finally {
       setCreating(false);
     }
@@ -113,7 +113,7 @@ export const AdminUsersPage: React.FC = () => {
       setResetModalOpen(false);
       setNewPassword('');
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Parolni tiklashda xatolik', 'error');
+      showToast(err.detail || 'Parolni tiklashda xatolik', 'error');
     } finally {
       setResetting(false);
     }

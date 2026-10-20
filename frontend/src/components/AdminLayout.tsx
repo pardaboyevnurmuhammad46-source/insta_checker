@@ -108,6 +108,17 @@ export const AdminLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-900">
+        {user?.dry_run && (
+          <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-xs font-medium text-amber-300 flex items-center justify-between sticky top-0 z-20 backdrop-blur">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-bold uppercase text-[10px]">
+                DRY_RUN
+              </span>
+              <span>Diqqat: Tizim simulyatsiya rejimida ishlamoqda. Instagram API ga haqiqiy so'rovlar yuborilmaydi.</span>
+            </div>
+            <span className="text-[11px] text-amber-400/80 hidden sm:inline">Sinov rejimi</span>
+          </div>
+        )}
         <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
           <Outlet />
         </main>

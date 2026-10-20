@@ -66,35 +66,38 @@ class UniqueLinkSerializer(serializers.ModelSerializer):
     def get_video_url(self, obj):
         return obj.video.url if obj.video else ''
 
-    def validate_video(self, value):
-        if hasattr(value, 'file'):
-            file_name = value.file.name
-            file_size = value.file.size
-        else:
-            file_name = getattr(value, 'name', '')
-            file_size = getattr(value, 'size', 0)
-
-        if file_name and not file_name.lower().endswith('.mp4'):
-            raise serializers.ValidationError("Faqat .mp4 formatidagi videolar qabul qilinadi.")
-        if file_size and file_size > 100 * 1024 * 1024:
-            raise serializers.ValidationError("Video hajmi 100MB dan oshmasligi kerak.")
-        return value
-
 
 class PostSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='link.user.name', read_only=True)
 
     class Meta:
         model = Post
-        fields = '__all__'
-        read_only_fields = [f.name for f in Post._meta.fields]
+        fields = [
+            'id', 'link', 'user_name', 'permalink', 'status', 'posted_at',
+            'deleted_detected_at', 'views', 'likes', 'comments_count',
+            'last_checked_at'
+        ]
+        read_only_fields = fields
+
+
+class AdminPostSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='link.user.name', read_only=True)
+
+    class Meta:
+        model = Post
+        fields = [
+            'id', 'link', 'user_name', 'ig_media_id', 'permalink', 'status',
+            'posted_at', 'deleted_detected_at', 'views', 'likes', 'comments_count',
+            'last_checked_at', 'next_check_at', 'error', 'retry_count'
+        ]
+        read_only_fields = fields
 
 
 class PostStatSerializer(serializers.ModelSerializer):
     class Meta:
         model = PostStat
-        fields = '__all__'
-        read_only_fields = [f.name for f in PostStat._meta.fields]
+        fields = ['id', 'post', 'views', 'likes', 'comments_count', 'checked_at']
+        read_only_fields = fields
 
 
 class PrizeSerializer(serializers.ModelSerializer):
@@ -102,34 +105,114 @@ class PrizeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Prize
-        fields = '__all__'
-        read_only_fields = [f.name for f in Prize._meta.fields]
+        fields = ['id', 'post', 'user_name', 'milestone', 'sent_at']
+        read_only_fields = fields
 
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
-        fields = '__all__'
-        read_only_fields = ['id', 'created_at']
+        fields = ['id', 'user', 'kind', 'message', 'is_read', 'created_at', 'related_prize']
+        read_only_fields = fields
 
 
 class DataDeletionRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = DataDeletionRequest
-        fields = '__all__'
-        read_only_fields = [f.name for f in DataDeletionRequest._meta.fields]
+        fields = ['id', 'confirmation_code', 'user_id', 'status', 'requested_at', 'details']
+        read_only_fields = fields
 
 
+from django.db import transaction
+from django.contrib.auth.password_validation import validate_password
+
+class MeSummarySerializer(serializers.Serializer):
+    total_views = serializers.IntegerField(default=0)
+    total_likes = serializers.IntegerField(default=0)
+    total_comments = serializers.IntegerField(default=0)
+    posts_count = serializers.IntegerField(default=0)
+    prizes_count = serializers.IntegerField(default=0)
+    last_checked_at = serializers.DateTimeField(allow_null=True)
+    next_milestone = serializers.IntegerField(allow_null=True)
+    views_remaining = serializers.IntegerField(allow_null=True)
+    progress_percent = serializers.FloatField(default=0.0)
+    milestones = serializers.ListField(child=serializers.IntegerField())
+
+class AdminSummarySerializer(serializers.Serializer):
+    total_users = serializers.IntegerField()
+    connected_users = serializers.IntegerField()
+    needs_reauth_users = serializers.IntegerField()
+    posts_by_status = serializers.DictField(child=serializers.IntegerField())
+    total_metrics = serializers.DictField(child=serializers.IntegerField())
+    total_views = serializers.IntegerField()
+    total_likes = serializers.IntegerField()
+    total_comments = serializers.IntegerField()
+    total_prizes = serializers.IntegerField()
+    expiring_tokens_count = serializers.IntegerField()
+    users_by_status = serializers.DictField(child=serializers.IntegerField())
+    links_by_status = serializers.DictField(child=serializers.IntegerField())
+    instagram_errors_last_hour = serializers.DictField(child=serializers.IntegerField(), required=False)
+    dry_run = serializers.BooleanField(default=False, required=False)
+
+class UserPublishStatusOutputSerializer(serializers.Serializer):
+    has_post = serializers.BooleanField()
+    status = serializers.CharField()
+    post_id = serializers.IntegerField(allow_null=True, required=False)
+    posted_at = serializers.DateTimeField(allow_null=True, required=False)
+    views = serializers.IntegerField(required=False)
+    likes = serializers.IntegerField(required=False)
+    comments_count = serializers.IntegerField(required=False)
+    permalink = serializers.URLField(allow_null=True, required=False)
+    error = serializers.CharField(allow_null=True, required=False)
+    retry_count = serializers.IntegerField(required=False)
+    can_retry = serializers.BooleanField(default=False)
+    retries_left = serializers.IntegerField(default=0)
+    can_publish = serializers.BooleanField(default=False)
+    can_publish_reason = serializers.CharField(allow_null=True, required=False)
+    upload_limits = serializers.DictField(required=False)
+
+class UserProfileOutputSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    email = serializers.EmailField()
+    is_staff = serializers.BooleanField()
+    role = serializers.CharField()
+    instagram_user = InstagramUserSerializer(allow_null=True)
+    dry_run = serializers.BooleanField(default=False, required=False)
+
+
+class HealthCheckOutputSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    database = serializers.CharField()
+    redis = serializers.CharField()
+    dry_run = serializers.BooleanField()
+
+
+class SimulateViewsInputSerializer(serializers.Serializer):
+    post_id = serializers.IntegerField()
+    views = serializers.IntegerField(min_value=0)
+
+
+class SimulatePostActionInputSerializer(serializers.Serializer):
+    post_id = serializers.IntegerField()
+
+
+class SimulateUserActionInputSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
 class AdminCreateUserSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
-    password = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True)
     name = serializers.CharField(max_length=255)
     is_staff = serializers.BooleanField(default=False, required=False)
     ig_user_id = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
 
     def validate_username(self, value):
-        if User.objects.filter(username=value).exists():
+        if User.objects.filter(username__iexact=value).exists():
             raise serializers.ValidationError("Bunday username band. Boshqa username tanlang.")
+        return value
+
+    def validate_password(self, value):
+        validate_password(value)
         return value
 
     def create(self, validated_data):
@@ -139,37 +222,43 @@ class AdminCreateUserSerializer(serializers.Serializer):
         is_staff = validated_data.get('is_staff', False)
         ig_user_id = validated_data.get('ig_user_id', '') or None
 
-        user = User.objects.create_user(
-            username=username,
-            password=password,
-            is_staff=is_staff,
-        )
-        ig_user = InstagramUser.objects.create(
-            user=user,
-            name=name,
-            ig_user_id=ig_user_id,
-            status='pending',
-        )
-        return {
-            "user_id": user.id,
-            "username": user.username,
-            "role": "admin" if user.is_staff else "user",
-            "is_staff": user.is_staff,
-            "instagram_user": {
-                "id": ig_user.id,
-                "name": ig_user.name,
-                "ig_user_id": ig_user.ig_user_id,
-                "status": ig_user.status,
-                "created_at": ig_user.created_at,
-            }
-        }
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                password=password,
+                is_staff=is_staff,
+            )
+            ig_user = InstagramUser.objects.create(
+                user=user,
+                name=name,
+                ig_user_id=ig_user_id,
+                status='pending',
+            )
+        return ig_user
 
+class AdminCreateUserOutputSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    role = serializers.SerializerMethodField()
+    is_staff = serializers.BooleanField(source='user.is_staff', read_only=True)
+    instagram_user = InstagramUserSerializer(source='*', read_only=True)
+
+    def get_role(self, obj):
+        return "admin" if obj.user.is_staff else "user"
 
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True, min_length=6)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_new_password(self, value):
+        validate_password(value)
+        return value
 
 
 class ResetPasswordSerializer(serializers.Serializer):
     user_id = serializers.IntegerField(required=False)
-    new_password = serializers.CharField(write_only=True, min_length=6)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_new_password(self, value):
+        validate_password(value)
+        return value

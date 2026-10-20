@@ -129,7 +129,7 @@ export const AdminVideosPage: React.FC = () => {
       setUploadProgress(null);
       fetchVideos(1);
     } catch (err: any) {
-      showToast(err.response?.data?.file?.[0] || 'Yuklashda xatolik yuz berdi', 'error');
+      showToast(err.errors?.file?.[0] || err.detail || 'Yuklashda xatolik yuz berdi', 'error');
     } finally {
       setUploading(false);
     }

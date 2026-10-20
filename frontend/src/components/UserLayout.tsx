@@ -227,6 +227,17 @@ export const UserLayout: React.FC = () => {
           </div>
         </header>
 
+        {user?.dry_run && (
+          <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-xs font-medium text-amber-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-bold uppercase text-[10px]">
+                DRY_RUN
+              </span>
+              <span>Diqqat: Sinov rejimi faol. Instagram API ga haqiqiy so'rov yuborilmaydi.</span>
+            </div>
+          </div>
+        )}
+
         <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
           <Outlet />
         </main>

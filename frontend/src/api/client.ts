@@ -74,7 +74,6 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // const response = await axios.post(`${API_BASE_URL}/api/token/refresh/`, {
         const response = await axios.post(`/api/token/refresh/`, {
           refresh: refreshToken,
         });
@@ -97,6 +96,17 @@ apiClient.interceptors.response.use(
       } finally {
         isRefreshing = false;
       }
+    }
+
+    // BOSQICH A: Xato formati. Standardlashtirilgan xatoni ushlash
+    if (error.response && error.response.data && typeof error.response.data === 'object') {
+        const data = error.response.data;
+        if (data.detail) {
+            error.detail = data.detail;
+            error.code = data.code;
+            error.errors = data.errors;
+            error.message = data.detail; // Har ehtimolga qarshi
+        }
     }
 
     return Promise.reject(error);

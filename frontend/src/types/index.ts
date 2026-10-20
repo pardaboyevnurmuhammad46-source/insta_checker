@@ -74,6 +74,16 @@ export interface DataDeletionRequest {
   details: string | null;
 }
 
+export interface InstagramErrorsSummary {
+  media_not_found: number;
+  token_invalid: number;
+  permission_denied: number;
+  rate_limit: number;
+  server_error: number;
+  other: number;
+  total: number;
+}
+
 export interface DashboardStats {
   users_by_status: Record<string, number>;
   links_by_status: Record<string, number>;
@@ -85,6 +95,8 @@ export interface DashboardStats {
   };
   total_prizes: number;
   expiring_tokens_count: number;
+  instagram_errors_last_hour?: InstagramErrorsSummary;
+  dry_run?: boolean;
 }
 
 export interface PaginatedResponse<T> {
@@ -101,6 +113,7 @@ export interface UserProfile {
   role: 'admin' | 'user';
   is_staff: boolean;
   instagram_user?: InstagramUser | null;
+  dry_run?: boolean;
 }
 
 export interface UserSummary {
@@ -110,6 +123,10 @@ export interface UserSummary {
   posts_count: number;
   prizes_count: number;
   last_checked_at: string | null;
+  next_milestone?: number | null;
+  views_remaining?: number | null;
+  progress_percent?: number;
+  milestones?: number[];
 }
 
 export interface AdminSummary {
@@ -127,6 +144,8 @@ export interface AdminSummary {
   total_comments: number;
   total_prizes: number;
   expiring_tokens_count: number;
+  instagram_errors_last_hour?: InstagramErrorsSummary;
+  dry_run?: boolean;
 }
 
 export interface AdminUserItem {
@@ -166,7 +185,7 @@ export interface VideoItem {
 export interface PublishStatus {
   has_post: boolean;
   post_id?: number;
-  status: 'queued' | 'publishing' | 'published' | 'failed' | 'none';
+  status: 'queued' | 'publishing' | 'published' | 'failed' | 'none' | 'deleted';
   posted_at?: string | null;
   views?: number;
   likes?: number;
@@ -175,4 +194,11 @@ export interface PublishStatus {
   error?: string | null;
   retry_count?: number;
   can_retry?: boolean;
+  retries_left?: number;
+  can_publish?: boolean;
+  can_publish_reason?: string | null;
+  upload_limits?: {
+    max_size_mb: number;
+    allowed_types: string[];
+  };
 }

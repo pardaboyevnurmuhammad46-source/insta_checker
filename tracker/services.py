@@ -12,59 +12,29 @@ from django.conf import settings
 from django.utils import timezone
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user, PostStat, Notification
+from .rate_limiter import rate_limiter
+from .instagram_errors import (
+    InstagramErrorType,
+    classify_instagram_error,
+    log_instagram_error,
+    mask_sensitive_data,
+    record_instagram_error,
+)
+from .exceptions import (
+    InstagramBaseError,
+    InstagramNetworkError,
+    InstagramOAuthError,
+    InstagramOAuthNetworkError,
+    InstagramPublishError,
+    InstagramPublishNetworkError,
+    InstagramMetricsError,
+    InstagramRateLimitError,
+    InstagramMetricsNetworkError,
+    MetaWebhookError,
+)
+from .instagram_client import get_instagram_client
 
 logger = logging.getLogger(__name__)
-
-
-# class InstagramOAuthError(Exception):
-#     pass
-# class InstagramNetworkError(InstagramOAuthError):
-#     pass
-# class InstagramPublishError(Exception):
-#     pass
-# class InstagramMetricsError(Exception):
-#     def __init__(self, message: str, is_deleted: bool = False, is_auth_error: bool = False):
-#         super().__init__(message)
-#         self.is_deleted = is_deleted
-#         self.is_auth_error = is_auth_error
-
-class InstagramBaseError(Exception):
-    pass
-
-
-class InstagramNetworkError(InstagramBaseError):
-    pass
-
-
-class InstagramOAuthError(InstagramBaseError):
-    pass
-
-
-class InstagramOAuthNetworkError(InstagramOAuthError, InstagramNetworkError):
-    pass
-
-
-class InstagramPublishError(InstagramBaseError):
-    pass
-
-
-class InstagramPublishNetworkError(InstagramPublishError, InstagramNetworkError):
-    pass
-
-
-class InstagramMetricsError(InstagramBaseError):
-    def __init__(self, message: str, is_deleted: bool = False, is_auth_error: bool = False):
-        super().__init__(message)
-        self.is_deleted = is_deleted
-        self.is_auth_error = is_auth_error
-
-
-class InstagramMetricsNetworkError(InstagramMetricsError, InstagramNetworkError):
-    pass
-
-
-class MetaWebhookError(Exception):
-    pass
 
 
 # ==========================================
@@ -72,77 +42,19 @@ class MetaWebhookError(Exception):
 # ==========================================
 
 def build_instagram_auth_url(token: str) -> str:
-    base_url = "https://www.instagram.com/oauth/authorize"
-    params = {
-        'client_id': settings.INSTAGRAM_APP_ID,
-        'redirect_uri': settings.INSTAGRAM_REDIRECT_URI,
-        'scope': settings.INSTAGRAM_SCOPE,
-        'response_type': 'code',
-        'state': str(token),
-    }
-    return f"{base_url}?{urllib.parse.urlencode(params)}"
+    return get_instagram_client().build_auth_url(token)
 
 
 def exchange_code_for_token(code: str) -> dict:
-    cleaned_code = code.split('#_')[0]
-    token_url = "https://api.instagram.com/oauth/access_token"
-    payload = {
-        'client_id': settings.INSTAGRAM_APP_ID,
-        'client_secret': settings.INSTAGRAM_APP_SECRET,
-        'grant_type': 'authorization_code',
-        'redirect_uri': settings.INSTAGRAM_REDIRECT_URI,
-        'code': cleaned_code,
-    }
-
-    try:
-        response = requests.post(token_url, data=payload, timeout=15)
-    except requests.RequestException as exc:
-        raise InstagramNetworkError(f"Instagram serveriga ulanishda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code != 200:
-        raise InstagramOAuthError(f"Access token olishda xatolik: {response.text}")
-
-    return response.json()
+    return get_instagram_client().exchange_code_for_token(code)
 
 
 def get_long_lived_token(short_lived_token: str) -> dict:
-    graph_url = "https://graph.instagram.com/access_token"
-    params = {
-        'grant_type': 'ig_exchange_token',
-        'client_secret': settings.INSTAGRAM_APP_SECRET,
-        'access_token': short_lived_token,
-    }
-
-    try:
-        response = requests.get(graph_url, params=params, timeout=15)
-    except requests.RequestException as exc:
-        raise InstagramNetworkError(f"Long-lived token olishda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code != 200:
-        raise InstagramOAuthError(f"Long-lived token olishda xatolik: {response.text}")
-
-    return response.json()
+    return get_instagram_client().get_long_lived_token(short_lived_token)
 
 
 def refresh_instagram_access_token(access_token: str) -> dict:
-    """
-    60 kunlik uzoq muddatli tokenni muddati tugashidan oldin yangilash (Graph API refresh_access_token).
-    """
-    url = "https://graph.instagram.com/refresh_access_token"
-    params = {
-        'grant_type': 'ig_refresh_token',
-        'access_token': access_token,
-    }
-
-    try:
-        response = requests.get(url, params=params, timeout=15)
-    except requests.RequestException as exc:
-        raise InstagramNetworkError(f"Token yangilashda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code != 200:
-        raise InstagramOAuthError(f"Token yangilab bo'lmadi: {response.text}")
-
-    return response.json()
+    return get_instagram_client().refresh_access_token(access_token)
 
 
 def refresh_user_token(user: InstagramUser) -> bool:
@@ -183,51 +95,11 @@ REQUIRED_PERMISSIONS = {
 
 
 def verify_token_permissions(access_token: str) -> tuple[bool, list[str]]:
-    """
-    Instagram foydalanuvchi tokeni kerakli ruxsatlarga ega ekanini tekshiradi:
-    - publish (instagram_business_content_publish)
-    - insights (instagram_business_manage_insights)
-    - comments (instagram_business_manage_comments)
-    """
-    url = "https://graph.instagram.com/me/permissions"
-    try:
-        response = requests.get(url, params={'access_token': access_token}, timeout=15)
-    except requests.RequestException as exc:
-        raise InstagramNetworkError(f"Ruxsatlarni tekshirishda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code != 200:
-        return True, []
-
-    data = response.json().get('data')
-    if data is None:
-        return True, []
-
-    granted = {
-        item.get('permission') for item in data
-        if item.get('status') == 'granted'
-    }
-    missing = [perm for perm in REQUIRED_PERMISSIONS if perm not in granted]
-    return (len(missing) == 0, missing)
+    return get_instagram_client().verify_token_permissions(access_token)
 
 
 def check_instagram_account_type(access_token: str, ig_user_id: str = 'me') -> str:
-    """
-    Instagram akkaunt turini tekshiradi (BUSINESS, MEDIA_CREATOR, PERSONAL).
-    """
-    url = f"https://graph.instagram.com/v21.0/{ig_user_id}"
-    try:
-        response = requests.get(url, params={'fields': 'account_type,username', 'access_token': access_token}, timeout=15)
-    except requests.RequestException as exc:
-        raise InstagramNetworkError(f"Akkaunt turini tekshirishda tarmoq xatosi: {exc}") from exc
-
-    if response.status_code != 200:
-        return 'BUSINESS'
-
-    data = response.json()
-    acc_type = data.get('account_type')
-    if not acc_type:
-        return 'BUSINESS'
-    return str(acc_type).upper()
+    return get_instagram_client().check_account_type(access_token, ig_user_id)
 
 
 def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, UniqueLink]:
@@ -291,94 +163,23 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
 # ==========================================
 
 def create_reels_container(ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
-    url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media"
-    payload = {
-        'media_type': 'REELS',
-        'video_url': video_url,
-        'caption': caption,
-        'access_token': access_token,
-    }
-    try:
-        response = requests.post(url, data=payload, timeout=30)
-    except requests.RequestException as exc:
-        # raise InstagramPublishError(f"Reels container yaratishda tarmoq xatoligi: {exc}") from exc
-        raise InstagramPublishNetworkError(f"Reels container yaratishda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code != 200:
-        raise InstagramPublishError(f"Reels container yaratib bo'lmadi: {response.text}")
-
-    container_id = response.json().get('id')
-    if not container_id:
-        raise InstagramPublishError("Container ID olinmadi.")
-    return str(container_id)
+    return get_instagram_client().create_reels_container(ig_user_id, video_url, access_token, caption)
 
 
 def check_container_status(container_id: str, access_token: str) -> dict:
-    url = f"https://graph.instagram.com/v21.0/{container_id}"
-    params = {
-        'fields': 'status_code,status',
-        'access_token': access_token,
-    }
-    try:
-        response = requests.get(url, params=params, timeout=15)
-    except requests.RequestException as exc:
-        # raise InstagramPublishError(f"Container holatini tekshirishda xatolik: {exc}") from exc
-        raise InstagramPublishNetworkError(f"Container holatini tekshirishda xatolik: {exc}") from exc
-
-    if response.status_code != 200:
-        raise InstagramPublishError(f"Container holatini olib bo'lmadi: {response.text}")
-
-    return response.json()
+    return get_instagram_client().check_container_status(container_id, access_token)
 
 
 def wait_for_container_ready(container_id: str, access_token: str, max_attempts: int = 12, delay: int = 5) -> bool:
-    for _ in range(max_attempts):
-        status_data = check_container_status(container_id, access_token)
-        status_code = status_data.get('status_code')
-        if status_code == 'FINISHED':
-            return True
-        elif status_code in ('ERROR', 'EXPIRED'):
-            raise InstagramPublishError(f"Reels yuklash xatoligi: {status_data}")
-        time.sleep(delay)
-
-    # raise InstagramPublishError("Reels videosini qayta ishlash vaqti tugadi (timeout).")
-    raise InstagramPublishNetworkError("Reels videosini qayta ishlash vaqti tugadi (timeout).")
+    return get_instagram_client().wait_for_container_ready(container_id, access_token, max_attempts=max_attempts, delay=delay)
 
 
 def publish_container(ig_user_id: str, container_id: str, access_token: str) -> str:
-    url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media_publish"
-    payload = {
-        'creation_id': container_id,
-        'access_token': access_token,
-    }
-    try:
-        response = requests.post(url, data=payload, timeout=30)
-    except requests.RequestException as exc:
-        # raise InstagramPublishError(f"Reels'ni publish qilishda tarmoq xatoligi: {exc}") from exc
-        raise InstagramPublishNetworkError(f"Reels'ni publish qilishda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code != 200:
-        raise InstagramPublishError(f"Reels publish qilinmadi: {response.text}")
-
-    media_id = response.json().get('id')
-    if not media_id:
-        raise InstagramPublishError("Nashr etilgan media ID olinmadi.")
-    return str(media_id)
+    return get_instagram_client().publish_container(ig_user_id, container_id, access_token)
 
 
 def get_media_permalink(ig_media_id: str, access_token: str) -> str:
-    url = f"https://graph.instagram.com/v21.0/{ig_media_id}"
-    params = {
-        'fields': 'permalink',
-        'access_token': access_token,
-    }
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        if response.status_code == 200:
-            return response.json().get('permalink') or f"https://www.instagram.com/reel/{ig_media_id}/"
-    except requests.RequestException:
-        pass
-    return f"https://www.instagram.com/reel/{ig_media_id}/"
+    return get_instagram_client().get_media_permalink(ig_media_id, access_token)
 
 
 def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
@@ -519,78 +320,12 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
         return now + timedelta(days=7)
 
 
-def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str) -> dict:
+def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
     """
     Instagram Graph API orqali media metrikalarini (likes, comments, views) oladi.
+    Haqiqiy yoki DRY_RUN rejimiga qarab tegishli mijoz adapteridan foydalanadi.
     """
-    media_url = f"https://graph.instagram.com/v21.0/{ig_media_id}"
-    params = {
-        'fields': 'like_count,comments_count,media_type',
-        'access_token': access_token,
-    }
-
-    try:
-        response = requests.get(media_url, params=params, timeout=15)
-    except requests.RequestException as exc:
-        # raise InstagramMetricsError(f"Media ma'lumotlarini olishda tarmoq xatoligi: {exc}") from exc
-        raise InstagramMetricsNetworkError(f"Media ma'lumotlarini olishda tarmoq xatoligi: {exc}") from exc
-
-    if response.status_code == 404:
-        raise InstagramMetricsError(f"Media topilmadi (o'chirilgan bo'lishi mumkin): {response.text}", is_deleted=True)
-
-    if response.status_code != 200:
-        is_auth_error = False
-        is_deleted = False
-        try:
-            err_data = response.json().get('error', {})
-            err_code = err_data.get('code')
-            if err_code == 190:
-                is_auth_error = True
-            elif err_code == 100 and err_data.get('error_subcode') == 33:
-                is_deleted = True
-        except Exception:
-            pass
-
-        raise InstagramMetricsError(
-            f"Media metrikalarini olib bo'lmadi: {response.text}",
-            is_deleted=is_deleted,
-            is_auth_error=is_auth_error,
-        )
-
-    data = response.json()
-    likes = data.get('like_count', 0)
-    comments = data.get('comments_count', 0)
-
-    # Reels Insights: views yoki plays ni olish
-    views = 0
-    insights_url = f"https://graph.instagram.com/v21.0/{ig_media_id}/insights"
-    for metric_name in ('views', 'plays'):
-        try:
-            ins_resp = requests.get(
-                insights_url,
-                params={'metric': metric_name, 'access_token': access_token},
-                timeout=15,
-            )
-            if ins_resp.status_code == 200:
-                ins_data = ins_resp.json().get('data', [])
-                for item in ins_data:
-                    if item.get('name') == metric_name:
-                        values = item.get('values', [])
-                        if values and isinstance(values, list):
-                            views = values[0].get('value', 0)
-                        elif 'total_value' in item:
-                            views = item.get('total_value', {}).get('value', 0)
-                        break
-                if views > 0:
-                    break
-        except requests.RequestException:
-            pass
-
-    return {
-        'likes': int(likes or 0),
-        'comments_count': int(comments or 0),
-        'views': int(views or 0),
-    }
+    return get_instagram_client().fetch_post_metrics(ig_media_id, access_token, post_id=post_id)
 
 
 def update_post_metrics(post: Post) -> Post:
@@ -605,7 +340,7 @@ def update_post_metrics(post: Post) -> Post:
         return post
 
     try:
-        metrics = fetch_post_metrics_from_instagram(post.ig_media_id, user.access_token)
+        metrics = fetch_post_metrics_from_instagram(post.ig_media_id, user.access_token, post_id=post.id)
         post.likes = metrics['likes']
         post.comments_count = metrics['comments_count']
         if metrics['views'] > 0 or post.views == 0:
@@ -629,25 +364,56 @@ def update_post_metrics(post: Post) -> Post:
         return post
 
     except InstagramMetricsError as exc:
-        if isinstance(exc, InstagramNetworkError):
+        error_type = getattr(exc, 'error_type', None)
+
+        # (d) Rate limit / throttle holati
+        if isinstance(exc, InstagramRateLimitError) or error_type == InstagramErrorType.RATE_LIMIT:
+            # 4-talab: Instagram rate limit xatosi kelsa, umumiy cheklagich vaqtincha pasaytirilsin
+            # (masalan 1 daqiqaga yarimiga), postlar o'chirilgan yoki xato deb belgilanmasin.
+            rate_limiter.trigger_backoff(duration_seconds=60)
+            logger.warning(
+                "Instagram rate limit xatosi (post_id=%s): umumiy tezlik 60s ga 50%% ga pasaytirildi. Post holati saqlandi.",
+                post.id,
+            )
+            # Post o'chirilgan yoki xato deb belgilanmasin: status va error o'zgartirilmaydi!
+            post.next_check_at = timezone.now() + timedelta(minutes=1)
+            post.save(update_fields=['next_check_at'])
+            return post
+
+        # (e) Tarmoq yoki server xatoligi
+        if isinstance(exc, InstagramNetworkError) or error_type == InstagramErrorType.SERVER_ERROR:
             raise
-        
-        if exc.is_deleted:
+
+        # (a) Media topilmadi / o'chirilgan
+        if exc.is_deleted or error_type == InstagramErrorType.MEDIA_NOT_FOUND:
             post.status = 'deleted'
             post.next_check_at = None
             post.deleted_detected_at = timezone.now()
             post.error = "Instagram'dan post o'chirilgan."
             post.save(update_fields=['status', 'next_check_at', 'deleted_detected_at', 'error'])
-        elif exc.is_auth_error:
+
+        # (c) Ruxsat yetishmaydi
+        elif error_type == InstagramErrorType.PERMISSION_DENIED:
+            user.status = 'needs_reauth'
+            user.save(update_fields=['status'])
+            post.error = "Instagram ruxsati (permission) yetishmaydi."
+            post.next_check_at = None
+            post.save(update_fields=['error', 'next_check_at'])
+
+        # (b) Token yaroqsiz / bekor qilingan
+        elif error_type == InstagramErrorType.TOKEN_INVALID or exc.is_auth_error:
             user.status = 'needs_reauth'
             user.save(update_fields=['status'])
             post.error = "Instagram tokeni yaroqsiz (needs_reauth)."
             post.next_check_at = None
             post.save(update_fields=['error', 'next_check_at'])
+
+        # (f) Boshqa xatolar
         else:
-            post.error = str(exc)
+            post.error = mask_sensitive_data(str(exc))
             post.next_check_at = timezone.now() + timedelta(minutes=30)
             post.save(update_fields=['error', 'next_check_at'])
+
         return post
 
 

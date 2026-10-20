@@ -75,7 +75,7 @@ export const LinksPage: React.FC = () => {
       showToast(res.data.message || 'Link qayta pending holatiga oʻtkazildi', 'success');
       fetchLinks();
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Qayta yuborib boʻlmadi', 'error');
+      showToast(err.detail || 'Qayta yuborib boʻlmadi', 'error');
     } finally {
       setResendingId(null);
     }
@@ -127,7 +127,7 @@ export const LinksPage: React.FC = () => {
       setUploadProgress(null);
       fetchLinks();
     } catch (err: any) {
-      const msg = err.response?.data?.video?.[0] || 'Link yaratishda xatolik yuz berdi';
+      const msg = err.errors?.video?.[0] || err.detail || 'Link yaratishda xatolik yuz berdi';
       showToast(msg, 'error');
     } finally {
       setSubmitting(false);

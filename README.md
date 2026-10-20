@@ -104,8 +104,54 @@ Instagram Graph API vebxuklar va OAuth uchun HTTPS bilan ishlaydigan ochiq manzi
 
 ## 🧪 Avtomatlashtirilgan Testlar
 
-Tizimda barcha bosqichlar (OAuth, Reels publishing, RBAC ruxsatlar, video boshqaruvi, adaptiv jadval, N+1 optimizatsiyasi) 95 ta avtomatlashtirilgan test bilan himoyalangan:
+Tizimda barcha bosqichlar (OAuth, Reels publishing, RBAC ruxsatlar, video boshqaruvi, adaptiv jadval, N+1 optimizatsiyasi, Rate limiting, Meta xatolar klassifikatsiyasi va DRY_RUN simulyatsiyasi) 127 ta avtomatlashtirilgan test bilan himoyalangan:
 
 ```bash
 docker compose exec web python manage.py test
 ```
+
+---
+
+## 🚀 Instagram'siz sinash (DRY_RUN Rejimi)
+
+Meta ilovasi (App Review) yoki haqiqiy Instagram akkauntsiz tizimning barcha biznes-funksiyalarini to'liq sinab ko'rish uchun **DRY_RUN** rejimi mavjud.
+
+### 1. Qanday yoqiladi?
+`.env` faylida quyidagi parametrlarni o'rnating:
+```env
+DEBUG=True
+INSTAGRAM_DRY_RUN=True
+DRY_RUN_PUBLISH_DELAY_SECONDS=2
+```
+> **Diqqat (Xavfsizlik qoidasi):** `DEBUG=False` bo'lganda `INSTAGRAM_DRY_RUN=True` qilib qo'yilsa, ilova ishga tushmaydi (`ImproperlyConfigured` xatosi bilan himoyalangan).
+
+### 2. Oqim ketma-ketligi (Test Flow):
+
+1. **Hisobga kirish**:
+   - Oddiy user: `POST /api/token/` (`username: bekzod`, `password: user123`) -> `access` token olinadi.
+2. **Instagram hisobini ulash (brauzersiz)**:
+   - `GET /api/user/connect-instagram/` so'rovi yuboriladi. Javobda sun'iy `auth_url` olinadi:
+     `http://localhost:8080/oauth/callback/?code=dry_run&state=<link_token>`
+   - Ushbu manzilga oddiy `GET` so'rov yuborish kifoya. Tizim avtomatik tarzda sun'iy tokenni saqlaydi va user holatini `connected` ga o'tkazadi.
+3. **Videoni Reels qilib joylash**:
+   - `POST /api/user/publish/` so'rovi yuboriladi.
+   - Post `queued` -> `publishing` (2 soniya simulyatsiya kechikishi) -> `published` holatiga o'tadi.
+   - `GET /api/user/publish-status/` orqali jarayonni kuzatish mumkin.
+4. **Ko'rishlar (Views) va Sovrinlarni simulyatsiya qilish (Faqat Admin)**:
+   - `POST /api/dev/simulate-views/`
+     ```json
+     {
+       "post_id": 1,
+       "views": 500
+     }
+     ```
+     Bu endpoint Instagram'da 500 ko'rish to'planganini simulyatsiya qiladi va haqiqiy tekshiruv quvurini ishga tushiradi (`PostStat` yoziladi, 500 marra uchun `Prize` va `Notification` yaratiladi).
+5. **Post o'chirilishini simulyatsiya qilish**:
+   - `POST /api/dev/simulate-delete/` (`{"post_id": 1}`)
+   - Post holati `deleted` bo'ladi va `deleted_detected_at` o'rnatiladi.
+6. **Token bekor qilinishini simulyatsiya qilish**:
+   - `POST /api/dev/simulate-token-revoked/` (`{"user_id": 1}`)
+   - User holati `needs_reauth` ga o'tadi.
+7. **Vaqtinchalik tarmoq xatosini simulyatsiya qilish**:
+   - `POST /api/dev/simulate-network-error/` (`{"post_id": 1}`)
+   - Post o'chirilmaydi va navbatdagi tekshiruv keyinroqqa qoldiriladi.

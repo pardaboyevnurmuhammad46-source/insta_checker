@@ -57,19 +57,8 @@ export const AdminUserDetailPage: React.FC = () => {
     );
   }
 
-  // Aggregate history for chart from all user's posts
-  const allHistory: any[] = [];
-  (userData.posts || []).forEach((p: any) => {
-    (p.history || []).forEach((h: any) => {
-      allHistory.push({
-        time: new Date(h.checked_at).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric', hour: '2-digit' }),
-        timestamp: new Date(h.checked_at).getTime(),
-        views: h.views,
-        likes: h.likes,
-      });
-    });
-  });
-  allHistory.sort((a, b) => a.timestamp - b.timestamp);
+  // Backend'dan to'g'ridan-to'g'ri olingan all_history (saralangan)
+  const allHistory = userData.all_history || [];
 
   return (
     <div className="space-y-8">
