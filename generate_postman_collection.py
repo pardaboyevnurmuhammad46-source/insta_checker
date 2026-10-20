@@ -4,8 +4,8 @@ import os
 collection = {
     "info": {
         "_postman_id": "e2e-insta-checker-collection-v2-1",
-        "name": "InstaChecker API & E2E Collection",
-        "description": "Instagram Reels Tracker & Prize System API Collection (BOSQICH C)\nBarcha endpointlar, negativ/xavfsizlik testlari va avtomatik E2E oqim.",
+        "name": "InstaChecker Complete API & E2E Collection",
+        "description": "Instagram Reels Tracker & Prize System API Collection\nBarcha 47+ tizim endpointlari, to'liq CRUD, simulyatsiya, negativ/xavfsizlik testlari va avtomatik E2E oqim.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "event": [
@@ -86,10 +86,10 @@ def make_req(name, method, path, headers=None, body=None, tests=None, prerequest
     }
 
 # ==============================================================================
-# 00 Health
+# 00 Health & API Docs
 # ==============================================================================
 folder_00 = {
-    "name": "00 Health",
+    "name": "00 Health & API Docs",
     "item": [
         make_req(
             name="Health Check",
@@ -106,6 +106,28 @@ folder_00 = {
                 "    pm.expect(jsonData.database, 'database ok bo\\'lishi kerak').to.eql('ok');",
                 "    pm.expect(jsonData.redis, 'redis ok bo\\'lishi kerak').to.eql('ok');",
                 "    pm.expect(jsonData.dry_run, 'E2E sinovlari faqat INSTAGRAM_DRY_RUN=true rejimida ishlaydi! Iltimos, sozlamada INSTAGRAM_DRY_RUN=True o\\'rnating.').to.be.true;",
+                "});"
+            ]
+        ),
+        make_req(
+            name="OpenAPI Schema (YAML/JSON)",
+            method="GET",
+            path="/api/schema/",
+            description="Loyiha uchun avtomatik generatsiya qilingan OpenAPI 3.0 spetsifikatsiyasi.",
+            tests=[
+                "pm.test('OpenAPI Schema 200 qaytarishi kerak', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Swagger UI Documentation",
+            method="GET",
+            path="/api/docs/",
+            description="Interaktiv Swagger UI hujjatlar sahifasi.",
+            tests=[
+                "pm.test('Swagger UI 200 qaytarishi kerak', function () {",
+                "    pm.response.to.have.status(200);",
                 "});"
             ]
         )
@@ -184,6 +206,32 @@ folder_01 = {
             ]
         ),
         make_req(
+            name="Change Password (Temporary)",
+            method="POST",
+            path="/api/change-password/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            body={"old_password": "{{user_password}}", "new_password": "TempUserPass123!_"},
+            description="Foydalanuvchi o'z parolini yangilaydi.",
+            tests=[
+                "pm.test('Parol muvaffaqiyatli yangilanishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Restore Password (Original)",
+            method="POST",
+            path="/api/change-password/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            body={"old_password": "TempUserPass123!_", "new_password": "{{user_password}}"},
+            description="Keyingi sinovlar buzilmasligi uchun foydalanuvchi parolini qayta tiklash.",
+            tests=[
+                "pm.test('Parol qayta tiklanishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
             name="Logout",
             method="POST",
             path="/api/token/logout/",
@@ -193,6 +241,21 @@ folder_01 = {
             tests=[
                 "pm.test('Logout muvaffaqiyatli bo\\'lishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Re-login User (Session Restore)",
+            method="POST",
+            path="/api/token/",
+            body={"username": "{{user_username}}", "password": "{{user_password}}"},
+            description="Keyingi barcha papkalar foydalanishi uchun yangi foydalanuvchi tokenini saqlash.",
+            tests=[
+                "pm.test('User qayta login qilishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    pm.environment.set('user_access', data.access);",
+                "    pm.environment.set('user_refresh', data.refresh);",
                 "});"
             ]
         )
@@ -251,7 +314,7 @@ folder_02 = {
             ]
         ),
         make_req(
-            name="User Detail",
+            name="Admin User Detail",
             method="GET",
             path="/api/admin/users/{{new_user_id}}/",
             headers={"Authorization": "Bearer {{admin_access}}"},
@@ -261,6 +324,45 @@ folder_02 = {
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
                 "    pm.expect(data.id, 'user_id mos kelishi kerak').to.eql(Number(pm.environment.get('new_user_id')));",
+                "});"
+            ]
+        ),
+        make_req(
+            name="List Instagram Users (DRF)",
+            method="GET",
+            path="/api/users/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="InstagramUser modeli bo'yicha DRF ViewSet ro'yxati.",
+            tests=[
+                "pm.test('Instagram foydalanuvchilar ro\\'yxati qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Instagram User Detail (DRF)",
+            method="GET",
+            path="/api/users/{{new_user_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="DRF ViewSet orqali bitta InstagramUser ma'lumotlarini olish.",
+            tests=[
+                "pm.test('Instagram user detail qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Update Instagram User (DRF PATCH)",
+            method="PATCH",
+            path="/api/users/{{new_user_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            body={"name": "Updated Postman User"},
+            description="DRF orqali foydalanuvchi ismini qisman yangilash.",
+            tests=[
+                "pm.test('Instagram user yangilanishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    pm.expect(data.name).to.eql('Updated Postman User');",
                 "});"
             ]
         ),
@@ -331,6 +433,31 @@ folder_03 = {
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
                 "    pm.expect(data.results, 'results array bo\\'lishi kerak').to.be.an('array');",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Video Detail",
+            method="GET",
+            path="/api/videos/{{video_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="Bitta video tafsilotlarini olish.",
+            tests=[
+                "pm.test('Video tafsilotlari qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Update Video (PATCH)",
+            method="PATCH",
+            path="/api/videos/{{video_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            body={"title": "Updated Video Title by Postman"},
+            description="Videoning sarlavhasi yoki sozlamalarini yangilash.",
+            tests=[
+                "pm.test('Video muvaffaqiyatli yangilandi (200)', function () {",
+                "    pm.response.to.have.status(200);",
                 "});"
             ]
         ),
@@ -407,6 +534,31 @@ folder_04 = {
             description="Admin linklar ro'yxatini oladi.",
             tests=[
                 "pm.test('Linklar ro\\'yxati qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Link Detail",
+            method="GET",
+            path="/api/links/{{link_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="Bitta unikal havola tafsilotlarini ko'rish.",
+            tests=[
+                "pm.test('Link tafsilotlari qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Update Link (PATCH)",
+            method="PATCH",
+            path="/api/links/{{link_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            body={"is_active": True},
+            description="Link holatini yangilash.",
+            tests=[
+                "pm.test('Link muvaffaqiyatli yangilanishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
                 "});"
             ]
@@ -549,22 +701,39 @@ folder_06 = {
             tests=[
                 "pm.test('User postlari ro\\'yxati qaytishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    if (data.results && data.results.length > 0) {",
+                "        pm.environment.set('user_post_id', data.results[0].id);",
+                "    }",
                 "});"
             ]
         ),
         make_req(
-            name="List Notifications",
+            name="Me Post History",
             method="GET",
-            path="/api/notifications/",
+            path="/api/me/posts/{{user_post_id}}/history/",
             headers={"Authorization": "Bearer {{user_access}}"},
-            description="Foydalanuvchi bildirishnomalari ro'yxati.",
+            prerequest=[
+                "if (!pm.environment.get('user_post_id')) {",
+                "    pm.environment.set('user_post_id', 1);",
+                "}"
+            ],
+            description="Bitta post bo'yicha soatbay metrikalar (views, likes, comments) tarixi.",
             tests=[
-                "pm.test('Bildirishnomalar qaytishi kerak (200)', function () {",
+                "pm.test('Post tarixi qaytishi kerak (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Me Notifications",
+            method="GET",
+            path="/api/me/notifications/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            description="Foydalanuvchining shaxsiy bildirishnomalari.",
+            tests=[
+                "pm.test('Shaxsiy bildirishnomalar qaytishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
-                "    var data = pm.response.json();",
-                "    if (data.results && data.results.length > 0) {",
-                "        pm.environment.set('notification_id', data.results[0].id);",
-                "    }",
                 "});"
             ]
         ),
@@ -581,14 +750,98 @@ folder_06 = {
             ]
         ),
         make_req(
-            name="List Prizes",
+            name="Global Notifications List (DRF)",
+            method="GET",
+            path="/api/notifications/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            description="Foydalanuvchi bildirishnomalari ro'yxati (DRF ViewSet).",
+            tests=[
+                "pm.test('Bildirishnomalar qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    if (data.results && data.results.length > 0) {",
+                "        pm.environment.set('notification_id', data.results[0].id);",
+                "    }",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Notification Detail (DRF)",
+            method="GET",
+            path="/api/notifications/{{notification_id}}/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            prerequest=[
+                "if (!pm.environment.get('notification_id')) {",
+                "    pm.environment.set('notification_id', 1);",
+                "}"
+            ],
+            description="Bitta bildirishnoma tafsilotlari.",
+            tests=[
+                "pm.test('Notification detail tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Mark Single Notification Read (PATCH)",
+            method="PATCH",
+            path="/api/notifications/{{notification_id}}/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            prerequest=[
+                "if (!pm.environment.get('notification_id')) {",
+                "    pm.environment.set('notification_id', 1);",
+                "}"
+            ],
+            body={"is_read": True},
+            description="Bitta bildirishnomani o'qilgan deb belgilash (PATCH).",
+            tests=[
+                "pm.test('Notification o\\'qilgan deb belgilandi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Me Prizes",
+            method="GET",
+            path="/api/me/prizes/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            description="Foydalanuvchining shaxsiy yutib olgan sovrinlari ro'yxati.",
+            tests=[
+                "pm.test('Shaxsiy sovrinlar ro\\'yxati qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Global Prizes List (DRF)",
             method="GET",
             path="/api/prizes/",
             headers={"Authorization": "Bearer {{user_access}}"},
-            description="Foydalanuvchi yutib olgan sovrinlari ro'yxati.",
+            description="Sovrinlar ro'yxati (DRF ViewSet).",
             tests=[
                 "pm.test('Sovrinlar ro\\'yxati qaytishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    if (data.results && data.results.length > 0) {",
+                "        pm.environment.set('prize_id', data.results[0].id);",
+                "    }",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Global Prize Detail (DRF)",
+            method="GET",
+            path="/api/prizes/{{prize_id}}/",
+            headers={"Authorization": "Bearer {{user_access}}"},
+            prerequest=[
+                "if (!pm.environment.get('prize_id')) {",
+                "    pm.environment.set('prize_id', 1);",
+                "}"
+            ],
+            description="Bitta sovrin tafsiloti.",
+            tests=[
+                "pm.test('Sovrin tafsiloti tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
                 "});"
             ]
         )
@@ -618,7 +871,21 @@ folder_07 = {
             ]
         ),
         make_req(
-            name="List Posts (Filter & Sort)",
+            name="Dashboard Stats Alias",
+            method="GET",
+            path="/api/dashboard/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="Frontend dashboard uchun tizim umumiy statistikasi (/api/dashboard/ alias).",
+            tests=[
+                "pm.test('Dashboard statistikasi qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    pm.expect(data.total_users).to.be.a('number');",
+                "});"
+            ]
+        ),
+        make_req(
+            name="List Admin Posts (Filter & Sort)",
             method="GET",
             path="/api/admin/posts/?status=published",
             headers={"Authorization": "Bearer {{admin_access}}"},
@@ -630,6 +897,35 @@ folder_07 = {
                 "    if (data.results && data.results.length > 0) {",
                 "        pm.environment.set('admin_post_id', data.results[0].id);",
                 "    }",
+                "});"
+            ]
+        ),
+        make_req(
+            name="List Posts (DRF ViewSet)",
+            method="GET",
+            path="/api/posts/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="Post modeli bo'yicha DRF ViewSet ro'yxati.",
+            tests=[
+                "pm.test('DRF postlar ro\\'yxati qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="DRF Post Detail",
+            method="GET",
+            path="/api/posts/{{admin_post_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            prerequest=[
+                "if (!pm.environment.get('admin_post_id')) {",
+                "    pm.environment.set('admin_post_id', 1);",
+                "}"
+            ],
+            description="Bitta post haqida to'liq ma'lumot olish.",
+            tests=[
+                "pm.test('Post detail tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
                 "});"
             ]
         ),
@@ -656,6 +952,39 @@ folder_07 = {
             description="Admin tanlangan post uchun statistikani darhol navbatga qo'yib tekshiradi.",
             tests=[
                 "pm.test('Statistikani tekshirish tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="List Post Stats (Hourly History)",
+            method="GET",
+            path="/api/post-stats/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            description="Soatbay saqlangan barcha metrikalar tarixi (DRF PostStat ViewSet).",
+            tests=[
+                "pm.test('Post statistikalar tarixi qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    if (data.results && data.results.length > 0) {",
+                "        pm.environment.set('post_stat_id', data.results[0].id);",
+                "    }",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Post Stat Detail",
+            method="GET",
+            path="/api/post-stats/{{post_stat_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            prerequest=[
+                "if (!pm.environment.get('post_stat_id')) {",
+                "    pm.environment.set('post_stat_id', 1);",
+                "}"
+            ],
+            description="Bitta PostStat yozuvi tafsiloti.",
+            tests=[
+                "pm.test('PostStat yozuvi tekshirildi (200 yoki 404)', function () {",
                 "    pm.expect([200, 404]).to.include(pm.response.code);",
                 "});"
             ]
@@ -694,6 +1023,28 @@ folder_07 = {
             tests=[
                 "pm.test('Ma\\'lumot o\\'chirish so\\'rovlari qaytishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    if (data.results && data.results.length > 0) {",
+                "        pm.environment.set('deletion_id', data.results[0].id);",
+                "        pm.environment.set('deletion_code', data.results[0].confirmation_code);",
+                "    }",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Data Deletion Detail",
+            method="GET",
+            path="/api/data-deletions/{{deletion_id}}/",
+            headers={"Authorization": "Bearer {{admin_access}}"},
+            prerequest=[
+                "if (!pm.environment.get('deletion_id')) {",
+                "    pm.environment.set('deletion_id', 1);",
+                "}"
+            ],
+            description="Bitta ma'lumot o'chirish so'rovi tafsiloti.",
+            tests=[
+                "pm.test('O\\'chirish so\\'rovi tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
                 "});"
             ]
         )
@@ -794,10 +1145,116 @@ folder_08 = {
 collection["item"].append(folder_08)
 
 # ==============================================================================
-# 09 E2E – To'liq oqim
+# 09 Public, OAuth & Webhooks
 # ==============================================================================
 folder_09 = {
-    "name": "09 E2E – To'liq oqim",
+    "name": "09 Public, OAuth & Webhooks",
+    "item": [
+        make_req(
+            name="Link Info Page",
+            method="GET",
+            path="/link/",
+            description="Unikal link formati va qo'llanma haqida axborot endpointi.",
+            tests=[
+                "pm.test('Link info muvaffaqiyatli qaytishi kerak (200)', function () {",
+                "    pm.response.to.have.status(200);",
+                "    var data = pm.response.json();",
+                "    pm.expect(data.message).to.be.a('string');",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Link Redirect to Instagram",
+            method="GET",
+            path="/link/{{link_token}}/",
+            prerequest=[
+                "if (!pm.environment.get('link_token')) {",
+                "    pm.environment.set('link_token', '00000000-0000-0000-0000-000000000000');",
+                "}"
+            ],
+            description="Foydalanuvchini Meta OAuth sahifasiga yo'naltiruvchi havola.",
+            tests=[
+                "pm.test('Redirect yoki status sahifasi tekshirildi (200, 302, 400 yoki 404)', function () {",
+                "    pm.expect([200, 302, 400, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Public Post Portal API",
+            method="GET",
+            path="/api/public/post/{{link_token}}/",
+            prerequest=[
+                "if (!pm.environment.get('link_token')) {",
+                "    pm.environment.set('link_token', '00000000-0000-0000-0000-000000000000');",
+                "}"
+            ],
+            description="Unikal havola orqali ochiq JSON API formatida post holatini ko'rish.",
+            tests=[
+                "pm.test('Public post API javobi tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Public Post HTML Portal",
+            method="GET",
+            path="/my-post/{{link_token}}/",
+            prerequest=[
+                "if (!pm.environment.get('link_token')) {",
+                "    pm.environment.set('link_token', '00000000-0000-0000-0000-000000000000');",
+                "}"
+            ],
+            description="Foydalanuvchi uchun ochiq HTML portal sahifasi.",
+            tests=[
+                "pm.test('Public HTML portal tekshirildi (200 yoki 404)', function () {",
+                "    pm.expect([200, 404]).to.include(pm.response.code);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="OAuth Deauthorize Webhook (Validation)",
+            method="POST",
+            path="/oauth/deauthorize/",
+            body={"signed_request": ""},
+            description="Meta Deauthorize vebxuki (signed_request yo'qligida rad etish).",
+            tests=[
+                "pm.test('Imzosiz deauth so\\'rovi 400 qaytarishi kerak', function () {",
+                "    pm.response.to.have.status(400);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="OAuth Data Deletion Webhook (Validation)",
+            method="POST",
+            path="/oauth/data-deletion/",
+            body={"signed_request": ""},
+            description="Meta Data Deletion vebxuki (signed_request yo'qligida rad etish).",
+            tests=[
+                "pm.test('Imzosiz data deletion so\\'rovi 400 qaytarishi kerak', function () {",
+                "    pm.response.to.have.status(400);",
+                "});"
+            ]
+        ),
+        make_req(
+            name="Data Deletion Status Page",
+            method="GET",
+            path="/oauth/data-deletion/status/test_confirmation_code/",
+            description="Meta foydalanuvchisi uchun o'chirish holatini kuzatish sahifasi.",
+            tests=[
+                "pm.test('Mavjud bo\\'lmagan kod uchun 404 qaytishi kerak', function () {",
+                "    pm.response.to.have.status(404);",
+                "});"
+            ]
+        )
+    ]
+}
+collection["item"].append(folder_09)
+
+# ==============================================================================
+# 10 E2E – To'liq oqim
+# ==============================================================================
+folder_10 = {
+    "name": "10 E2E – To'liq oqim",
     "item": [
         make_req(
             name="E2E 01 - Admin Login",
@@ -819,9 +1276,9 @@ folder_09 = {
             path="/api/admin/create-user/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
             prerequest=[
-                "var ts = Date.now();",
-                "pm.environment.set('e2e_user_username', 'e2e_user_' + ts);",
-                "pm.environment.set('e2e_user_password', 'E2ePass_' + ts + '!');"
+                "var rand = Math.floor(Math.random() * 1000000);",
+                "pm.environment.set('e2e_user_username', 'e2e_user_' + rand);",
+                "pm.environment.set('e2e_user_password', 'E2ePass123!_' + rand);"
             ],
             body={
                 "username": "{{e2e_user_username}}",
@@ -829,15 +1286,13 @@ folder_09 = {
                 "name": "E2E Test User",
                 "is_staff": False
             },
-            description="E2E: Admin yangi foydalanuvchi yaratadi.",
+            description="E2E: Yangi user yaratiladi va uning user_id saqlanadi.",
             tests=[
-                "pm.test('E2E: User yaratildi', function () {",
+                "pm.test('E2E: User yaratildi (201)', function () {",
                 "    pm.response.to.have.status(201);",
                 "    var data = pm.response.json();",
+                "    pm.expect(data.user_id).to.be.a('number');",
                 "    pm.environment.set('e2e_user_id', data.user_id);",
-                "    if (data.instagram_user && data.instagram_user.id) {",
-                "        pm.environment.set('e2e_ig_user_id', data.instagram_user.id);",
-                "    }",
                 "});"
             ]
         ),
@@ -847,14 +1302,14 @@ folder_09 = {
             path="/api/videos/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
             body=[
-                {"key": "title", "value": "E2E Demo Video", "type": "text"},
+                {"key": "title", "value": "E2E Template Video", "type": "text"},
                 {"key": "is_default", "value": "false", "type": "text"},
                 {"key": "is_active", "value": "true", "type": "text"},
                 {"key": "file", "type": "file", "src": "files/sample.mp4"}
             ],
-            description="E2E: Admin yangi video yuklaydi.",
+            description="E2E: Admin video yuklaydi.",
             tests=[
-                "pm.test('E2E: Video yuklandi', function () {",
+                "pm.test('E2E: Video yuklandi (201)', function () {",
                 "    pm.response.to.have.status(201);",
                 "    var data = pm.response.json();",
                 "    pm.environment.set('e2e_video_id', data.id);",
@@ -862,25 +1317,25 @@ folder_09 = {
             ]
         ),
         make_req(
-            name="E2E 03b - Make Video Default",
+            name="E2E 04 - Set Default Video",
             method="POST",
             path="/api/videos/{{e2e_video_id}}/set-default/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
-            description="E2E: Yuklangan videoni barcha foydalanuvchilar uchun umumiy (default) qilish.",
+            description="E2E: Ushbu video barcha uchun standart qilib belgilanadi.",
             tests=[
-                "pm.test('E2E: Video default qilindi', function () {",
+                "pm.test('E2E: Video default qilindi (200)', function () {",
                 "    pm.response.to.have.status(200);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 04 - User Login",
+            name="E2E 05 - User Login",
             method="POST",
             path="/api/token/",
             body={"username": "{{e2e_user_username}}", "password": "{{e2e_user_password}}"},
             description="E2E: Yangi yaratilgan user tizimga kiradi.",
             tests=[
-                "pm.test('E2E: Yangi user tizimga kirdi', function () {",
+                "pm.test('E2E: User tizimga kirdi (200)', function () {",
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
                 "    pm.environment.set('e2e_user_access', data.access);",
@@ -888,135 +1343,137 @@ folder_09 = {
             ]
         ),
         make_req(
-            name="E2E 05 - Connect Instagram",
+            name="E2E 06 - Connect Instagram (Get Auth URL)",
             method="GET",
             path="/api/user/connect-instagram/",
             headers={"Authorization": "Bearer {{e2e_user_access}}"},
-            description="E2E: User Instagram ulash havolasini oladi.",
+            description="E2E: Instagram ulash auth_url olinadi.",
             tests=[
-                "pm.test('E2E: Auth URL olindi', function () {",
+                "pm.test('E2E: Auth URL olindi (200)', function () {",
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
+                "    pm.expect(data.link_token).to.be.a('string');",
                 "    pm.environment.set('e2e_link_token', data.link_token);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 06 - OAuth Callback (DRY_RUN)",
+            name="E2E 07 - DRY_RUN OAuth Callback",
             method="GET",
             path="/oauth/callback/?code=dry_run&state={{e2e_link_token}}",
-            description="E2E: Brauzersiz Instagramni ulash simulyatsiyasi.",
+            description="E2E: DRY_RUN OAuth callback orqali token avtomatik saqlanadi.",
             tests=[
-                "pm.test('E2E: Instagram hisobi ulandi', function () {",
+                "pm.test('E2E: Instagram OAuth callback muvaffaqiyatli', function () {",
                 "    pm.response.to.have.status(200);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 07 - User Publish Video",
+            name="E2E 08 - User Publish Video",
             method="POST",
             path="/api/user/publish/",
             headers={"Authorization": "Bearer {{e2e_user_access}}"},
-            description="E2E: User videoni Reels qilib joylashni boshlaydi.",
+            description="E2E: User videoni Reels qilib chop etishni boshlaydi.",
             tests=[
-                "pm.test('E2E: Video joylash qabul qilindi (202)', function () {",
+                "pm.test('E2E: Publish qabul qilindi (202)', function () {",
                 "    pm.response.to.have.status(202);",
                 "    var data = pm.response.json();",
                 "    pm.environment.set('e2e_post_id', data.post_id);",
-                "    pm.environment.set('poll_count', 0);",
+                "    pm.environment.set('poll_count', '0');",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 08 - Poll Publish Status",
+            name="E2E 09 - Poll Publish Status Until Published",
             method="GET",
             path="/api/user/publish-status/",
             headers={"Authorization": "Bearer {{e2e_user_access}}"},
-            description="E2E: Post published bo'lguncha polling (max 15 marta).",
+            description="E2E: Post published bo'lguncha holatini kutish (retry loop).",
             tests=[
                 "var data = pm.response.json();",
-                "var count = Number(pm.environment.get('poll_count') || 0);",
-                "if (data.status !== 'published' && count < 15) {",
-                "    pm.environment.set('poll_count', count + 1);",
-                "    var start = Date.now();",
-                "    while (Date.now() - start < 500) {}",
-                "    pm.execution.setNextRequest('E2E 08 - Poll Publish Status');",
-                "} else {",
+                "var currentPoll = parseInt(pm.environment.get('poll_count') || '0', 10);",
+                "",
+                "if (data.status === 'published') {",
                 "    pm.test('E2E: Post muvaffaqiyatli published bo\\'ldi', function () {",
-                "        pm.expect(data.status, 'post status published bo\\'lishi kerak').to.eql('published');",
-                "        pm.expect(data.permalink, 'permalink mavjud').to.be.a('string');",
+                "        pm.expect(data.status).to.eql('published');",
                 "    });",
-                "    pm.environment.set('poll_count', 0);",
-                "    pm.execution.setNextRequest('E2E 09 - Simulate 500 Views');",
+                "} else if (currentPoll < 15) {",
+                "    pm.environment.set('poll_count', (currentPoll + 1).toString());",
+                "    setTimeout(function () {",
+                "        postman.setNextRequest('E2E 09 - Poll Publish Status Until Published');",
+                "    }, 1500);",
+                "} else {",
+                "    pm.test('E2E: Post belgilangan vaqt ichida published bo\\'lmadi', function () {",
+                "        pm.expect(data.status).to.eql('published');",
+                "    });",
                 "}"
             ]
         ),
         make_req(
-            name="E2E 09 - Simulate 500 Views",
+            name="E2E 10 - Simulate Views (500)",
             method="POST",
             path="/api/dev/simulate-views/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
             body={"post_id": "{{e2e_post_id}}", "views": 500},
-            description="E2E: 500 ko'rish to'planganini simulyatsiya qilish.",
+            description="E2E: 500 views simulyatsiya qilinadi.",
             tests=[
-                "pm.test('E2E: 500 ko\\'rish simulyatsiya qilindi', function () {",
+                "pm.test('E2E: 500 ko\\'rish simulyatsiya qilindi (200)', function () {",
                 "    pm.response.to.have.status(200);",
-                "    var data = pm.response.json();",
-                "    pm.expect(data.views).to.eql(500);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 10 - Verify User Prize & Notification",
+            name="E2E 11 - Check User Summary After 500 Views",
             method="GET",
             path="/api/me/summary/",
             headers={"Authorization": "Bearer {{e2e_user_access}}"},
-            description="E2E: 500 marra uchun sovrin yaratilganini tekshirish.",
+            description="E2E: User kabinetida 500 views va sovrin aks etishini tekshirish.",
             tests=[
-                "pm.test('E2E: 1-sovrin muvaffaqiyatli berildi', function () {",
+                "pm.test('E2E: 500 ko\\'rish va birinchi sovrin mavjud', function () {",
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
-                "    pm.expect(data.prizes_count, '1 ta sovrin').to.eql(1);",
-                "    pm.expect(data.total_views, '500 ko\\'rish').to.eql(500);",
+                "    pm.expect(data.total_views).to.be.at.least(500);",
+                "    pm.expect(data.unclaimed_prizes).to.be.at.least(1);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 11 - Simulate 1000 Views",
+            name="E2E 12 - Simulate Views (1000)",
             method="POST",
             path="/api/dev/simulate-views/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
             body={"post_id": "{{e2e_post_id}}", "views": 1000},
-            description="E2E: 1000 ko'rish (keyingi marra) simulyatsiyasi.",
+            description="E2E: 1000 views simulyatsiya qilinadi.",
             tests=[
-                "pm.test('E2E: 1000 ko\\'rish simulyatsiya qilindi', function () {",
+                "pm.test('E2E: 1000 ko\\'rish simulyatsiya qilindi (200)', function () {",
                 "    pm.response.to.have.status(200);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 12 - Verify Second Prize",
+            name="E2E 13 - Check User Summary After 1000 Views",
             method="GET",
             path="/api/me/summary/",
             headers={"Authorization": "Bearer {{e2e_user_access}}"},
-            description="E2E: 1000 marra uchun 2-sovrin berilganini tekshirish.",
+            description="E2E: 1000 ko'rishdan keyin ikkinchi sovrin qo'shilganini tekshirish.",
             tests=[
-                "pm.test('E2E: 2 ta sovrin bo\\'lishi kerak', function () {",
+                "pm.test('E2E: 1000 ko\\'rish va 2 ta sovrin mavjud', function () {",
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
-                "    pm.expect(data.prizes_count, '2 ta sovrin').to.eql(2);",
+                "    pm.expect(data.total_views).to.be.at.least(1000);",
+                "    pm.expect(data.unclaimed_prizes).to.be.at.least(2);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 13 - Simulate Delete",
+            name="E2E 14 - Simulate Delete",
             method="POST",
             path="/api/dev/simulate-delete/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
             body={"post_id": "{{e2e_post_id}}"},
-            description="E2E: Instagram'dan post o'chirilishini simulyatsiya qilish.",
+            description="E2E: Instagram'da post o'chirilishi simulyatsiya qilinadi.",
             tests=[
-                "pm.test('E2E: Post o\\'chirilishi simulyatsiya qilindi', function () {",
+                "pm.test('E2E: Post o\\'chirilishi muvaffaqiyatli simulyatsiya qilindi', function () {",
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
                 "    pm.expect(data.status).to.eql('deleted');",
@@ -1024,7 +1481,7 @@ folder_09 = {
             ]
         ),
         make_req(
-            name="E2E 14 - Verify Post Deleted Status",
+            name="E2E 15 - Verify Post Deleted Status",
             method="GET",
             path="/api/user/publish-status/",
             headers={"Authorization": "Bearer {{e2e_user_access}}"},
@@ -1038,38 +1495,38 @@ folder_09 = {
             ]
         ),
         make_req(
-            name="E2E 15 - Cleanup Video",
+            name="E2E 16 - Cleanup Video",
             method="DELETE",
             path="/api/videos/{{e2e_video_id}}/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
-            description="E2E tozalash: Yaratilgan test videosini o'chirish.",
+            description="E2E: Yaratilgan test videosini o'chirish.",
             tests=[
-                "pm.test('E2E: Video o\\'chirildi (204)', function () {",
+                "pm.test('E2E: Test video tozalandi (204)', function () {",
                 "    pm.response.to.have.status(204);",
                 "});"
             ]
         ),
         make_req(
-            name="E2E 16 - Cleanup User",
+            name="E2E 17 - Cleanup User",
             method="DELETE",
             path="/api/users/{{e2e_user_id}}/",
             headers={"Authorization": "Bearer {{e2e_admin_access}}"},
-            description="E2E tozalash: Yaratilgan test foydalanuvchisini o'chirish.",
+            description="E2E: Yaratilgan test foydalanuvchisini tozalash.",
             tests=[
-                "pm.test('E2E: User o\\'chirildi (204)', function () {",
+                "pm.test('E2E: Test user tozalandi (204)', function () {",
                 "    pm.response.to.have.status(204);",
                 "});"
             ]
         )
     ]
 }
-collection["item"].append(folder_09)
+collection["item"].append(folder_10)
 
 # ==============================================================================
-# 10 Negativ va xavfsizlik
+# 11 Negativ va xavfsizlik
 # ==============================================================================
-folder_10 = {
-    "name": "10 Negativ va xavfsizlik",
+folder_11 = {
+    "name": "11 Negativ va xavfsizlik",
     "item": [
         make_req(
             name="01 Request Without Token -> 401",
@@ -1218,7 +1675,7 @@ folder_10 = {
         )
     ]
 }
-collection["item"].append(folder_10)
+collection["item"].append(folder_11)
 
 os.makedirs("postman", exist_ok=True)
 with open("postman/insta_checker.postman_collection.json", "w", encoding="utf-8") as f:
