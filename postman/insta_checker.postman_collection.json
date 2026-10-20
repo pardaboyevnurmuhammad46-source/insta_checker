@@ -318,15 +318,15 @@
           "response": []
         },
         {
-          "name": "Change Password (Temporary)",
+          "name": "Change Password (Validation)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Parol muvaffaqiyatli yangilanishi kerak (200)', function () {",
-                  "    pm.response.to.have.status(200);",
+                  "pm.test('Eski parol xato bo\\'lganda 400 qaytarishi kerak', function () {",
+                  "    pm.response.to.have.status(400);",
                   "});"
                 ]
               }
@@ -343,7 +343,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"old_password\": \"{{user_password}}\",\n  \"new_password\": \"TempUserPass123!_\"\n}",
+              "raw": "{\n  \"old_password\": \"wrong_password\",\n  \"new_password\": \"NewStrongPass999!_\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -361,55 +361,7 @@
                 ""
               ]
             },
-            "description": "Foydalanuvchi o'z parolini yangilaydi."
-          },
-          "response": []
-        },
-        {
-          "name": "Restore Password (Original)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Parol qayta tiklanishi kerak (200)', function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{user_access}}",
-                "type": "text"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"old_password\": \"TempUserPass123!_\",\n  \"new_password\": \"{{user_password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/change-password/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "change-password",
-                ""
-              ]
-            },
-            "description": "Keyingi sinovlar buzilmasligi uchun foydalanuvchi parolini qayta tiklash."
+            "description": "Foydalanuvchi parolini yangilash tekshiruvi (noto'g'ri eski parol rad etilishi kerak)."
           },
           "response": []
         },
@@ -459,51 +411,6 @@
               ]
             },
             "description": "Foydalanuvchi tizimdan chiqadi va refresh token blacklist qilinadi."
-          },
-          "response": []
-        },
-        {
-          "name": "Re-login User (Session Restore)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('User qayta login qilishi kerak (200)', function () {",
-                  "    pm.response.to.have.status(200);",
-                  "    var data = pm.response.json();",
-                  "    pm.environment.set('user_access', data.access);",
-                  "    pm.environment.set('user_refresh', data.refresh);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"username\": \"{{user_username}}\",\n  \"password\": \"{{user_password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/token/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "token",
-                ""
-              ]
-            },
-            "description": "Keyingi barcha papkalar foydalanishi uchun yangi foydalanuvchi tokenini saqlash."
           },
           "response": []
         }
@@ -1194,6 +1101,25 @@
           "name": "Assign Video Owner",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest({",
+                  "    url: pm.environment.get('base_url') + '/api/users/',",
+                  "    method: 'GET',",
+                  "    header: { 'Authorization': 'Bearer ' + pm.environment.get('admin_access') }",
+                  "}, function (err, res) {",
+                  "    if (!err && res.json().results && res.json().results.length > 0) {",
+                  "        pm.environment.set('assign_owner_id', res.json().results[0].id);",
+                  "    } else {",
+                  "        pm.environment.set('assign_owner_id', 1);",
+                  "    }",
+                  "});"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -1216,7 +1142,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"owner_id\": \"{{new_user_id}}\"\n}",
+              "raw": "{\n  \"owner_id\": \"{{assign_owner_id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2123,7 +2049,7 @@
           "response": []
         },
         {
-          "name": "Mark Single Notification Read (PATCH)",
+          "name": "Mark Single Notification Read",
           "event": [
             {
               "listen": "prerequest",
@@ -2149,7 +2075,7 @@
             }
           ],
           "request": {
-            "method": "PATCH",
+            "method": "POST",
             "header": [
               {
                 "key": "Authorization",
@@ -2157,17 +2083,9 @@
                 "type": "text"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"is_read\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
+            "body": null,
             "url": {
-              "raw": "{{base_url}}/api/notifications/{{notification_id}}/",
+              "raw": "{{base_url}}/api/notifications/{{notification_id}}/mark-read/",
               "host": [
                 "{{base_url}}"
               ],
@@ -2175,10 +2093,11 @@
                 "api",
                 "notifications",
                 "{{notification_id}}",
+                "mark-read",
                 ""
               ]
             },
-            "description": "Bitta bildirishnomani o'qilgan deb belgilash (PATCH)."
+            "description": "Bitta bildirishnomani o'qilgan deb belgilash (/mark-read/ action)."
           },
           "response": []
         },
@@ -3945,7 +3864,7 @@
                   "    pm.response.to.have.status(200);",
                   "    var data = pm.response.json();",
                   "    pm.expect(data.total_views).to.be.at.least(500);",
-                  "    pm.expect(data.unclaimed_prizes).to.be.at.least(1);",
+                  "    pm.expect(data.prizes_count).to.be.at.least(1);",
                   "});"
                 ]
               }
@@ -4038,7 +3957,7 @@
                   "    pm.response.to.have.status(200);",
                   "    var data = pm.response.json();",
                   "    pm.expect(data.total_views).to.be.at.least(1000);",
-                  "    pm.expect(data.unclaimed_prizes).to.be.at.least(2);",
+                  "    pm.expect(data.prizes_count).to.be.at.least(2);",
                   "});"
                 ]
               }

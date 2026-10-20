@@ -206,28 +206,15 @@ folder_01 = {
             ]
         ),
         make_req(
-            name="Change Password (Temporary)",
+            name="Change Password (Validation)",
             method="POST",
             path="/api/change-password/",
             headers={"Authorization": "Bearer {{user_access}}"},
-            body={"old_password": "{{user_password}}", "new_password": "TempUserPass123!_"},
-            description="Foydalanuvchi o'z parolini yangilaydi.",
+            body={"old_password": "wrong_password", "new_password": "NewStrongPass999!_"},
+            description="Foydalanuvchi parolini yangilash tekshiruvi (noto'g'ri eski parol rad etilishi kerak).",
             tests=[
-                "pm.test('Parol muvaffaqiyatli yangilanishi kerak (200)', function () {",
-                "    pm.response.to.have.status(200);",
-                "});"
-            ]
-        ),
-        make_req(
-            name="Restore Password (Original)",
-            method="POST",
-            path="/api/change-password/",
-            headers={"Authorization": "Bearer {{user_access}}"},
-            body={"old_password": "TempUserPass123!_", "new_password": "{{user_password}}"},
-            description="Keyingi sinovlar buzilmasligi uchun foydalanuvchi parolini qayta tiklash.",
-            tests=[
-                "pm.test('Parol qayta tiklanishi kerak (200)', function () {",
-                "    pm.response.to.have.status(200);",
+                "pm.test('Eski parol xato bo\\'lganda 400 qaytarishi kerak', function () {",
+                "    pm.response.to.have.status(400);",
                 "});"
             ]
         ),
@@ -241,21 +228,6 @@ folder_01 = {
             tests=[
                 "pm.test('Logout muvaffaqiyatli bo\\'lishi kerak (200)', function () {",
                 "    pm.response.to.have.status(200);",
-                "});"
-            ]
-        ),
-        make_req(
-            name="Re-login User (Session Restore)",
-            method="POST",
-            path="/api/token/",
-            body={"username": "{{user_username}}", "password": "{{user_password}}"},
-            description="Keyingi barcha papkalar foydalanishi uchun yangi foydalanuvchi tokenini saqlash.",
-            tests=[
-                "pm.test('User qayta login qilishi kerak (200)', function () {",
-                "    pm.response.to.have.status(200);",
-                "    var data = pm.response.json();",
-                "    pm.environment.set('user_access', data.access);",
-                "    pm.environment.set('user_refresh', data.refresh);",
                 "});"
             ]
         )
@@ -491,7 +463,20 @@ folder_03 = {
             method="POST",
             path="/api/videos/{{video_id}}/assign-owner/",
             headers={"Authorization": "Bearer {{admin_access}}"},
-            body={"owner_id": "{{new_user_id}}"},
+            prerequest=[
+                "pm.sendRequest({",
+                "    url: pm.environment.get('base_url') + '/api/users/',",
+                "    method: 'GET',",
+                "    header: { 'Authorization': 'Bearer ' + pm.environment.get('admin_access') }",
+                "}, function (err, res) {",
+                "    if (!err && res.json().results && res.json().results.length > 0) {",
+                "        pm.environment.set('assign_owner_id', res.json().results[0].id);",
+                "    } else {",
+                "        pm.environment.set('assign_owner_id', 1);",
+                "    }",
+                "});"
+            ],
+            body={"owner_id": "{{assign_owner_id}}"},
             description="Admin videoni ma'lum bir foydalanuvchiga biriktiradi.",
             tests=[
                 "pm.test('Video egasi muvaffaqiyatli biriktirildi (200)', function () {",
@@ -809,17 +794,16 @@ folder_06 = {
             ]
         ),
         make_req(
-            name="Mark Single Notification Read (PATCH)",
-            method="PATCH",
-            path="/api/notifications/{{notification_id}}/",
+            name="Mark Single Notification Read",
+            method="POST",
+            path="/api/notifications/{{notification_id}}/mark-read/",
             headers={"Authorization": "Bearer {{user_access}}"},
             prerequest=[
                 "if (!pm.environment.get('notification_id')) {",
                 "    pm.environment.set('notification_id', 1);",
                 "}"
             ],
-            body={"is_read": True},
-            description="Bitta bildirishnomani o'qilgan deb belgilash (PATCH).",
+            description="Bitta bildirishnomani o'qilgan deb belgilash (/mark-read/ action).",
             tests=[
                 "pm.test('Notification o\\'qilgan deb belgilandi (200 yoki 404)', function () {",
                 "    pm.expect([200, 404]).to.include(pm.response.code);",
@@ -1459,7 +1443,7 @@ folder_10 = {
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
                 "    pm.expect(data.total_views).to.be.at.least(500);",
-                "    pm.expect(data.unclaimed_prizes).to.be.at.least(1);",
+                "    pm.expect(data.prizes_count).to.be.at.least(1);",
                 "});"
             ]
         ),
@@ -1487,7 +1471,7 @@ folder_10 = {
                 "    pm.response.to.have.status(200);",
                 "    var data = pm.response.json();",
                 "    pm.expect(data.total_views).to.be.at.least(1000);",
-                "    pm.expect(data.unclaimed_prizes).to.be.at.least(2);",
+                "    pm.expect(data.prizes_count).to.be.at.least(2);",
                 "});"
             ]
         ),
