@@ -19,6 +19,7 @@ class InstagramUserAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'ig_user_id', 'status', 'token_expires_at', 'created_at')
     list_filter = ('status', 'created_at')
     search_fields = ('name', 'ig_user_id')
+    exclude = ('access_token',)
     actions = ['refresh_token_action']
 
     @admin.action(description="Tanlangan foydalanuvchilar tokenini yangilash")

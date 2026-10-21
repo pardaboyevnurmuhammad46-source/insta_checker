@@ -12,6 +12,7 @@ from .instagram_errors import (
     log_instagram_error,
     record_instagram_error,
     get_redis_client,
+    mask_sensitive_data,
 )
 from .exceptions import (
     InstagramOAuthError,
@@ -138,7 +139,7 @@ class RealInstagramClient(InstagramClient):
             raise InstagramNetworkError(f"Instagram serveriga ulanishda tarmoq xatoligi: {exc}") from exc
 
         if response.status_code != 200:
-            raise InstagramOAuthError(f"Access token olishda xatolik: {response.text}")
+            raise InstagramOAuthError(f"Access token olishda xatolik: {mask_sensitive_data(response.text)}")
 
         return response.json()
 
@@ -156,7 +157,7 @@ class RealInstagramClient(InstagramClient):
             raise InstagramNetworkError(f"Long-lived token olishda tarmoq xatoligi: {exc}") from exc
 
         if response.status_code != 200:
-            raise InstagramOAuthError(f"Long-lived token olishda xatolik: {response.text}")
+            raise InstagramOAuthError(f"Long-lived token olishda xatolik: {mask_sensitive_data(response.text)}")
 
         return response.json()
 
@@ -173,7 +174,7 @@ class RealInstagramClient(InstagramClient):
             raise InstagramNetworkError(f"Token yangilashda tarmoq xatoligi: {exc}") from exc
 
         if response.status_code != 200:
-            raise InstagramOAuthError(f"Token yangilab bo'lmadi: {response.text}")
+            raise InstagramOAuthError(f"Token yangilab bo'lmadi: {mask_sensitive_data(response.text)}")
 
         return response.json()
 

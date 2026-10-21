@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -20,12 +21,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from .env file
 load_dotenv(BASE_DIR / '.env')
 
+if 'test' in sys.argv and not os.environ.get('TOKEN_ENCRYPTION_KEY'):
+    from cryptography.fernet import Fernet
+    os.environ['TOKEN_ENCRYPTION_KEY'] = Fernet.generate_key().decode('utf-8')
+
+for k in ('INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET', 'TOKEN_ENCRYPTION_KEY', 'SECRET_KEY', 'DB_PASSWORD'):
+    if not os.environ.get(k): raise KeyError(f"Majburiy muhit o'zgaruvchisi o'rnatilmagan: {k}")
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-x@#7n8#)tg=ae&+-7nslu1zfna8x2*)xt6o85cr1%wzoc=-4!0')
+SECRET_KEY = os.environ['SECRET_KEY']
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 't', 'yes')
@@ -94,7 +102,7 @@ DATABASES = {
         'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.postgresql'),
         'NAME': os.getenv('DB_NAME', 'ig_tracker'),
         'USER': os.getenv('DB_USER', 'postgres'),
-        'PASSWORD': os.getenv('DB_PASSWORD', '1234'),
+        'PASSWORD': os.environ['DB_PASSWORD'],
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
     }
@@ -200,14 +208,11 @@ SIMPLE_JWT = {
 cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
 
-# Instagram sozlamalari
-for key in ('INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET', 'INSTAGRAM_ACCESS_TOKEN'):
-    if key not in os.environ:
-        raise KeyError(f"Majburiy muhit o'zgaruvchisi o'rnatilmagan: {key}. Iltimos, {key} ni belgilang.")
-
+# Instagram & Token shifrlash sozlamalari
 INSTAGRAM_APP_ID = os.environ['INSTAGRAM_APP_ID']
 INSTAGRAM_APP_SECRET = os.environ['INSTAGRAM_APP_SECRET']
-INSTAGRAM_ACCESS_TOKEN = os.environ['INSTAGRAM_ACCESS_TOKEN']
+INSTAGRAM_ACCESS_TOKEN = os.environ.get('INSTAGRAM_ACCESS_TOKEN', '')
+TOKEN_ENCRYPTION_KEY = os.environ['TOKEN_ENCRYPTION_KEY']
 INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', 'http://127.0.0.1:8000/oauth/callback/')
 INSTAGRAM_SCOPE = os.getenv(
     'INSTAGRAM_SCOPE',

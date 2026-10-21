@@ -205,9 +205,16 @@ def classify_instagram_error(
 SENSITIVE_PATTERNS = [
     # access_token=... yoki token=...
     (re.compile(r'((?:access_token|client_secret|token|secret)\s*[:=]\s*["\']?)([^"\'&\s]+)(["\']?)', re.IGNORECASE), r'\1***\3'),
-    # Meta access token prefikslari (masalan EAAB..., IGQV...)
+    # Bearer header tokenlari
+    (re.compile(r'(Bearer\s+)([a-zA-Z0-9_\-\.]+)', re.IGNORECASE), r'\1***'),
+    # Meta access token prefikslari (masalan EAAB..., IGQV..., IGAA...)
     (re.compile(r'\b(EAAB[a-zA-Z0-9_\-]{10,})\b'), r'EAAB***'),
     (re.compile(r'\b(IGQV[a-zA-Z0-9_\-]{10,})\b'), r'IGQV***'),
+    (re.compile(r'\b(IGAA[a-zA-Z0-9_\-]{10,})\b'), r'IGAA***'),
+    # Fernet encrypted tokenlar
+    (re.compile(r'\b(gAAAAA[a-zA-Z0-9_\-]{20,})\b'), r'gAAAAA***'),
+    # Dry run mock tokenlar
+    (re.compile(r'\b(dry_run_[a-zA-Z0-9_\-]{8,})\b'), r'dry_run_***'),
 ]
 
 

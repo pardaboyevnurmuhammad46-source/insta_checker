@@ -2,6 +2,27 @@ import os
 import uuid
 from django.conf import settings
 from django.db import models
+from .crypto import encrypt_token, decrypt_token
+
+
+class EncryptedTextField(models.TextField):
+    description = "Fernet bilan shifrlangan TextField"
+
+    def from_db_value(self, value, expression, connection):
+        if value is None or value == '':
+            return value
+        return decrypt_token(value)
+
+    def to_python(self, value):
+        if value is None or value == '':
+            return value
+        return decrypt_token(value)
+
+    def get_prep_value(self, value):
+        value = super().get_prep_value(value)
+        if value is None or value == '':
+            return value
+        return encrypt_token(value)
 
 
 def video_upload_path(instance, filename):
@@ -28,7 +49,7 @@ class InstagramUser(models.Model):
     )
     name = models.CharField(max_length=255)
     ig_user_id = models.CharField(max_length=100, null=True, blank=True)
-    access_token = models.TextField(null=True, blank=True)
+    access_token = EncryptedTextField(null=True, blank=True)
     token_expires_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)

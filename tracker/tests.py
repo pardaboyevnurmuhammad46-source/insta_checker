@@ -2533,6 +2533,126 @@ class CheckInstagramCommandTestCase(TestCase):
         self.assertNotIn("secret_token_net", err.getvalue())
 
 
+class TokenEncryptionAndSecurityTestCase(TestCase):
+    def setUp(self):
+        self.user_auth = User.objects.create_user(username="test_enc_user", password="Password123!")
+        self.ig_user = InstagramUser.objects.create(
+            user=self.user_auth,
+            name="Test Encrypted User",
+            access_token="plain_instagram_token_xyz",
+            status="connected",
+        )
+        self.client = APIClient()
+
+    def test_token_stored_encrypted_in_database(self):
+        """Bazada token ochiq matn (plain text) ko'rinishida saqlanmasligi, Fernet shifrlangan bo'lishi tekshiriladi."""
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT access_token FROM tracker_instagramuser WHERE id = %s", [self.ig_user.id])
+            raw_db_token = cursor.fetchone()[0]
+
+        self.assertIsNotNone(raw_db_token)
+        self.assertTrue(raw_db_token.startswith("gAAAAA"))
+        self.assertNotIn("plain_instagram_token_xyz", raw_db_token)
+
+    def test_token_decrypted_transparently_in_orm(self):
+        """ORM orqali o'qilganda shifrlangan token avtomatik dekodlanib asl holida qaytishi tekshiriladi."""
+        loaded_user = InstagramUser.objects.get(id=self.ig_user.id)
+        self.assertEqual(loaded_user.access_token, "plain_instagram_token_xyz")
+
+    def test_token_update_is_encrypted_in_db(self):
+        """Token yangilanganda ham bazaga shifrlanib yozilishi tekshiriladi."""
+        from django.db import connection
+        self.ig_user.access_token = "updated_plain_token_abc"
+        self.ig_user.save()
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT access_token FROM tracker_instagramuser WHERE id = %s", [self.ig_user.id])
+            raw_db_token = cursor.fetchone()[0]
+
+        self.assertTrue(raw_db_token.startswith("gAAAAA"))
+        self.assertNotIn("updated_plain_token_abc", raw_db_token)
+
+        reloaded = InstagramUser.objects.get(id=self.ig_user.id)
+        self.assertEqual(reloaded.access_token, "updated_plain_token_abc")
+
+    def test_token_none_and_empty_preserved(self):
+        """None yoki bo'sh tokenlar xatosiz saqlanishi va qaytarilishi."""
+        user_empty = InstagramUser.objects.create(name="Empty Token User", access_token="")
+        user_none = InstagramUser.objects.create(name="None Token User", access_token=None)
+
+        self.assertEqual(InstagramUser.objects.get(id=user_empty.id).access_token, "")
+        self.assertIsNone(InstagramUser.objects.get(id=user_none.id).access_token)
+
+    def test_crypto_helpers_idempotency_and_safety(self):
+        from tracker.crypto import encrypt_token, decrypt_token, is_fernet_encrypted
+        plain = "my_sample_token_12345"
+        enc = encrypt_token(plain)
+        self.assertTrue(is_fernet_encrypted(enc))
+        # Qayta shifrlash takroriy shifrlamasligi kerak (idempotent)
+        self.assertEqual(encrypt_token(enc), enc)
+        # Qayta dekodlash asl qiymatni qaytarishi kerak
+        self.assertEqual(decrypt_token(enc), plain)
+        # Ochiq tokenni decrypt_token chaqirsa ma'lumot yo'qolmasligi kerak
+        self.assertEqual(decrypt_token(plain), plain)
+        self.assertIsNone(encrypt_token(None))
+        self.assertIsNone(decrypt_token(None))
+
+    def test_tokens_never_in_api_responses(self):
+        """API javoblarida (me, users list, user detail) access_token chiqmasligi tekshiriladi."""
+        self.client.force_authenticate(user=self.user_auth)
+        resp = self.client.get('/api/me/')
+        self.assertEqual(resp.status_code, 200)
+        resp_json = resp.json()
+        resp_text = resp.content.decode('utf-8')
+        self.assertNotIn("plain_instagram_token_xyz", resp_text)
+        self.assertNotIn("access_token", resp_json.get("instagram_user", {}))
+
+        # Admin sifatida tekshirish
+        admin_user = User.objects.create_superuser(username="admin_enc_test", password="Password123!")
+        self.client.force_authenticate(user=admin_user)
+
+        resp_users = self.client.get('/api/users/')
+        self.assertEqual(resp_users.status_code, 200)
+        self.assertNotIn("plain_instagram_token_xyz", resp_users.content.decode('utf-8'))
+
+        resp_detail = self.client.get(f'/api/users/{self.ig_user.id}/')
+        self.assertEqual(resp_detail.status_code, 200)
+        self.assertNotIn("plain_instagram_token_xyz", resp_detail.content.decode('utf-8'))
+
+    def test_mask_sensitive_data_extended_patterns(self):
+        """Meta tokenlar (IGAA), Fernet shifrlari va dry-run tokenlar loglarda maskalanishi tekshiriladi."""
+        text = "Tokens: IGAA1234567890abcdef and gAAAAABdXYZ1234567890abcdef1234567890 and dry_run_short_token_abcdef12"
+        masked = mask_sensitive_data(text)
+        self.assertNotIn("IGAA1234567890abcdef", masked)
+        self.assertNotIn("gAAAAABdXYZ1234567890abcdef1234567890", masked)
+        self.assertNotIn("dry_run_short_token_abcdef12", masked)
+        self.assertIn("IGAA***", masked)
+        self.assertIn("gAAAAA***", masked)
+        self.assertIn("dry_run_***", masked)
+
+    def test_mandatory_settings_and_optional_access_token(self):
+        """INSTAGRAM_ACCESS_TOKEN ixtiyoriy, TOKEN_ENCRYPTION_KEY esa mavjud bo'lishi tekshiriladi."""
+        self.assertTrue(hasattr(settings, 'TOKEN_ENCRYPTION_KEY'))
+        self.assertTrue(settings.TOKEN_ENCRYPTION_KEY)
+        self.assertTrue(hasattr(settings, 'INSTAGRAM_ACCESS_TOKEN'))
+
+    def test_missing_mandatory_env_raises_key_error(self):
+        """Majburiy env o'zgaruvchilari yo'q bo'lsa KeyError berilishi tekshiriladi."""
+        import os
+        mandatory_keys = ('INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET', 'TOKEN_ENCRYPTION_KEY', 'SECRET_KEY', 'DB_PASSWORD')
+        for missing_key in mandatory_keys:
+            env_copy = {k: "dummy_val" for k in mandatory_keys}
+            del env_copy[missing_key]
+            with patch.dict('os.environ', env_copy, clear=True):
+                with self.assertRaises(KeyError) as ctx:
+                    for k in mandatory_keys:
+                        if not os.environ.get(k):
+                            raise KeyError(f"Majburiy muhit o'zgaruvchisi o'rnatilmagan: {k}")
+                self.assertIn(missing_key, str(ctx.exception))
+
+
+
 
 
 

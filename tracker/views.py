@@ -37,6 +37,7 @@ from .models import (
     PostStat,
     Notification,
 )
+from .instagram_errors import mask_sensitive_data
 from .serializers import (
     InstagramUserSerializer,
     VideoSerializer,
@@ -1250,7 +1251,7 @@ def instagram_callback(request):
     try:
         user, link = complete_instagram_oauth(code=code, token=state)
     except InstagramOAuthError as exc:
-        logger.error(f"InstagramOAuthError: {exc}")
+        logger.error("InstagramOAuthError: %s", mask_sensitive_data(str(exc)))
         UniqueLink.objects.filter(token=state, status__in=('pending', 'opened')).update(status='failed')
         return render(request, 'tracker/status.html', {
             'is_success': False,
