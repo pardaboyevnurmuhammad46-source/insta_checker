@@ -31,8 +31,7 @@ services:
       - DB_HOST=db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - INSTAGRAM_DRY_RUN=${INSTAGRAM_DRY_RUN:-${DRY_RUN:-True}}
-      - DRY_RUN_PUBLISH_DELAY_SECONDS=${DRY_RUN_PUBLISH_DELAY_SECONDS:-0}
+      - INSTAGRAM_MODE=${INSTAGRAM_MODE:-real}
     depends_on:
       db:
         condition: service_healthy
@@ -51,8 +50,7 @@ services:
       - DB_HOST=db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - INSTAGRAM_DRY_RUN=${INSTAGRAM_DRY_RUN:-${DRY_RUN:-True}}
-      - DRY_RUN_PUBLISH_DELAY_SECONDS=${DRY_RUN_PUBLISH_DELAY_SECONDS:-0}
+      - INSTAGRAM_MODE=${INSTAGRAM_MODE:-real}
     depends_on:
       - redis
       - db
@@ -67,8 +65,7 @@ services:
       - DB_HOST=db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - INSTAGRAM_DRY_RUN=${INSTAGRAM_DRY_RUN:-${DRY_RUN:-True}}
-      - DRY_RUN_PUBLISH_DELAY_SECONDS=${DRY_RUN_PUBLISH_DELAY_SECONDS:-0}
+      - INSTAGRAM_MODE=${INSTAGRAM_MODE:-real}
     depends_on:
       - redis
       - db

@@ -217,6 +217,14 @@ class InstagramOAuthTestCase(TestCase):
 
 class ReelsPublishingTestCase(TestCase):
     def setUp(self):
+        self.patcher_requests_get = patch('tracker.services.requests.get')
+        self.mock_requests_get = self.patcher_requests_get.start()
+        mock_acc_resp = MagicMock()
+        mock_acc_resp.status_code = 200
+        mock_acc_resp.json.return_value = {"account_type": "BUSINESS"}
+        self.mock_requests_get.return_value = mock_acc_resp
+        self.addCleanup(self.patcher_requests_get.stop)
+
         self.user = InstagramUser.objects.create(
             name="Publisher User",
             ig_user_id="1784140002",
@@ -1254,11 +1262,17 @@ class Phase3VideoManagementTestCase(TestCase):
         # User A User B ning videosini ID bilan so'rasa 404 oladi
         self.assertEqual(self.client.get(f"/api/videos/{v_b.id}/").status_code, 404)
 
+    @patch('tracker.services.requests.get')
     @patch('tracker.services.create_reels_container')
     @patch('tracker.services.wait_for_container_ready')
     @patch('tracker.services.publish_container')
     @patch('tracker.services.get_media_permalink')
-    def test_publish_reels_uses_video_selection_rule(self, mock_permalink, mock_publish, mock_wait, mock_container):
+    def test_publish_reels_uses_video_selection_rule(self, mock_permalink, mock_publish, mock_wait, mock_container, mock_get):
+        mock_acc_resp = MagicMock()
+        mock_acc_resp.status_code = 200
+        mock_acc_resp.json.return_value = {"account_type": "BUSINESS"}
+        mock_get.return_value = mock_acc_resp
+
         mock_container.return_value = "cont_123"
         mock_publish.return_value = "media_123"
         mock_permalink.return_value = "https://instagram.com/reel/123"
@@ -2095,11 +2109,12 @@ class MaskingAndCountersTestCase(TestCase):
 
     def test_admin_dashboard_shows_error_types(self):
         """Admin dashboard API da oxirgi 1 soatdagi xato turlari soni ko'rinadi."""
+        cache.delete('admin_summary_cache')
+        reset_error_counters()
         record_instagram_error(InstagramErrorType.RATE_LIMIT)
         record_instagram_error(InstagramErrorType.SERVER_ERROR)
 
         self.client.force_authenticate(user=self.admin)
-        cache.clear()
 
         resp = self.client.get("/api/dashboard/")
         self.assertEqual(resp.status_code, 200)
@@ -2433,6 +2448,90 @@ class UserRegistrationTestCase(TestCase):
         }
         response = self.client.post("/api/register/", payload)
         self.assertEqual(response.status_code, 400)
+
+
+class CheckInstagramCommandTestCase(TestCase):
+    @patch('tracker.management.commands.check_instagram.requests.get')
+    def test_check_instagram_success(self, mock_get):
+        from io import StringIO
+        from django.core.management import call_command
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "user_id": "17841400000000",
+            "username": "official_account",
+            "account_type": "BUSINESS",
+        }
+        mock_get.return_value = mock_resp
+
+        out = StringIO()
+        err = StringIO()
+        with patch.dict('os.environ', {'INSTAGRAM_ACCESS_TOKEN': 'super_secret_token_123'}):
+            call_command('check_instagram', stdout=out, stderr=err)
+
+        output = out.getvalue()
+        self.assertIn("username: official_account", output)
+        self.assertIn("account_type: BUSINESS", output)
+        self.assertNotIn("super_secret_token_123", output)
+        self.assertNotIn("super_secret_token_123", err.getvalue())
+
+    def test_check_instagram_missing_token(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        out = StringIO()
+        err = StringIO()
+        with patch.dict('os.environ', {'INSTAGRAM_ACCESS_TOKEN': ''}):
+            with patch('django.conf.settings.INSTAGRAM_ACCESS_TOKEN', ''):
+                call_command('check_instagram', stdout=out, stderr=err)
+
+        self.assertIn("topilmadi yoki bo'sh", err.getvalue())
+
+    @patch('tracker.management.commands.check_instagram.requests.get')
+    def test_check_instagram_api_error_masks_token(self, mock_get):
+        from io import StringIO
+        from django.core.management import call_command
+
+        secret_token = "my_private_token_xyz"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.json.return_value = {
+            "error": {
+                "message": f"Error validating access token: {secret_token}",
+                "type": "OAuthException",
+                "code": 190,
+                "error_subcode": 463,
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        out = StringIO()
+        err = StringIO()
+        with patch.dict('os.environ', {'INSTAGRAM_ACCESS_TOKEN': secret_token}):
+            call_command('check_instagram', stdout=out, stderr=err)
+
+        err_output = err.getvalue()
+        self.assertIn("code=190", err_output)
+        self.assertIn("[REDACTED]", err_output)
+        self.assertNotIn(secret_token, err_output)
+        self.assertNotIn(secret_token, out.getvalue())
+
+    @patch('tracker.management.commands.check_instagram.requests.get')
+    def test_check_instagram_network_error(self, mock_get):
+        from io import StringIO
+        from django.core.management import call_command
+        import requests
+
+        mock_get.side_effect = requests.RequestException("Connection timed out")
+        out = StringIO()
+        err = StringIO()
+        with patch.dict('os.environ', {'INSTAGRAM_ACCESS_TOKEN': 'secret_token_net'}):
+            call_command('check_instagram', stdout=out, stderr=err)
+
+        self.assertIn("Tarmoq xatoligi", err.getvalue())
+        self.assertNotIn("secret_token_net", err.getvalue())
+
 
 
 

@@ -533,7 +533,9 @@ def get_instagram_client() -> InstagramClient:
     """
     Sozlamaga qarab RealInstagramClient yoki DryRunInstagramClient qaytaradi.
     Tizim bo'ylab mijoz faqat bitta joyda aniqlanadi.
+    Faqat INSTAGRAM_MODE='mock' yoki INSTAGRAM_DRY_RUN=True bo'lganda soxta klient ishlatiladi.
+    Real rejimda (default: INSTAGRAM_MODE='real') soxta klient hech qachon ishlatilmaydi.
     """
-    if getattr(settings, 'INSTAGRAM_DRY_RUN', False):
+    if getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False):
         return DryRunInstagramClient()
     return RealInstagramClient()
