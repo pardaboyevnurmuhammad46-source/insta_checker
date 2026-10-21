@@ -35,10 +35,26 @@ export const UserVideoPage: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [videoTitle, setVideoTitle] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const pollIntervalRef = useRef<any>(null);
 
   const isConnected = user?.instagram_user?.status === 'connected';
+
+  // Timer while publishing is running
+  useEffect(() => {
+    let timer: any = null;
+    if (publishStatus?.status === 'queued' || publishStatus?.status === 'publishing') {
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [publishStatus?.status]);
 
   const fetchData = async () => {
     try {
@@ -66,7 +82,7 @@ export const UserVideoPage: React.FC = () => {
     fetchData();
   }, []);
 
-  // Polling logic when status is queued or publishing
+  // Polling logic when status is queued or publishing (2 second rapid polling)
   useEffect(() => {
     if (publishStatus?.status === 'queued' || publishStatus?.status === 'publishing') {
       pollIntervalRef.current = setInterval(async () => {
@@ -85,7 +101,7 @@ export const UserVideoPage: React.FC = () => {
         } catch {
           // ignore polling error
         }
-      }, 4000);
+      }, 2000);
     }
 
     return () => {
@@ -336,54 +352,155 @@ export const UserVideoPage: React.FC = () => {
             </div>
           )}
 
-          {/* Live Publish Status Badge */}
-          {publishStatus?.has_post && (
-            <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Joylash Holati
-                </span>
-                {publishStatus.status === 'queued' && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-950 text-amber-300 border border-amber-800">
-                    <Loader2 size={13} className="animate-spin" /> Navbatda kutilmoqda...
+          {/* Real-time Publishing Pipeline Indicator */}
+          {isPublishingNow && (
+            <div className="p-5 rounded-2xl border border-indigo-500/40 bg-indigo-950/20 backdrop-blur-sm space-y-4 shadow-lg animate-in fade-in duration-200">
+              <div className="flex items-center justify-between border-b border-indigo-900/50 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl">
+                    <Loader2 size={18} className="animate-spin" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-white text-sm">
+                      {publishStatus?.status === 'queued'
+                        ? "Navbatga qo'yildi..."
+                        : "Instagram Meta serverida Reels yaratilmoqda..."}
+                    </h4>
+                    <p className="text-xs text-indigo-300/80 mt-0.5">
+                      Meta algoritmi video sifatini tekshirishi va tayyorlashi 25–45 soniya oladi
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs font-mono font-bold text-indigo-300 bg-indigo-900/60 px-3 py-1 rounded-full border border-indigo-700/60">
+                    ⏱ {elapsedSeconds}s
                   </span>
-                )}
-                {publishStatus.status === 'publishing' && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800">
-                    <Loader2 size={13} className="animate-spin" /> Instagram Reelsga yuklanmoqda...
-                  </span>
-                )}
-                {publishStatus.status === 'published' && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                    <CheckCircle2 size={14} /> Muvaffaqiyatli joylandi!
-                  </span>
-                )}
-                {publishStatus.status === 'failed' && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-950 text-rose-300 border border-rose-800">
-                    <AlertCircle size={14} /> Joylashda xatolik
-                  </span>
-                )}
+                </div>
               </div>
 
-              {publishStatus.status === 'failed' && publishStatus.error && (
-                <div className="text-xs text-rose-300 bg-rose-950/40 p-3 rounded-lg border border-rose-900/50">
-                  <p className="font-semibold mb-0.5">Xato sababi:</p>
-                  <p>{publishStatus.error}</p>
+              {/* Step by Step visual flow */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-900/80 border border-emerald-900/40">
+                  <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                  <div className="text-left">
+                    <span className="text-[11px] font-semibold text-white block">1. Tayyorgarlik</span>
+                    <span className="text-[10px] text-emerald-400">Token & Video ulandi</span>
+                  </div>
                 </div>
-              )}
 
-              {publishStatus.permalink && (
-                <div className="pt-1">
+                <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-900/80 border border-indigo-500/50 shadow-inner">
+                  <Loader2 size={16} className="text-indigo-400 animate-spin shrink-0" />
+                  <div className="text-left">
+                    <span className="text-[11px] font-semibold text-white block">2. Meta Transcoding</span>
+                    <span className="text-[10px] text-indigo-300">Formatlanmoqda ({elapsedSeconds}s)</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/80 opacity-60">
+                  <div className="w-4 h-4 rounded-full border border-slate-600 flex items-center justify-center text-[9px] text-slate-400">
+                    3
+                  </div>
+                  <div className="text-left">
+                    <span className="text-[11px] font-medium text-slate-400 block">3. Nashr etish</span>
+                    <span className="text-[10px] text-slate-500">Reels sahifasiga chiqish</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Published Reel Showcase Card */}
+          {publishStatus?.status === 'published' && (
+            <div className="p-5 rounded-2xl border border-emerald-500/40 bg-emerald-950/15 backdrop-blur-sm space-y-4 shadow-lg animate-in fade-in duration-200">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-emerald-900/40 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+                    <CheckCircle2 size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-white text-base">Videongiz Instagram Reelsda faol!</h4>
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-900/60 text-emerald-300 border border-emerald-700/60">
+                        Joylandi
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {publishStatus.posted_at
+                        ? new Date(publishStatus.posted_at).toLocaleString('uz-UZ')
+                        : 'Muvaffaqiyatli nashr etildi'}
+                    </p>
+                  </div>
+                </div>
+
+                {publishStatus.permalink && (
                   <a
                     href={publishStatus.permalink}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-pink-400 hover:text-pink-300 underline"
+                    className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 via-rose-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-semibold shadow-md transition transform hover:-translate-y-0.5"
                   >
-                    <span>Instagramda ko'rish</span>
-                    <ExternalLink size={13} />
+                    <span>Instagramda ochish</span>
+                    <ExternalLink size={14} />
                   </a>
+                )}
+              </div>
+
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 text-center">
+                  <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">
+                    Ko'rishlar
+                  </span>
+                  <span className="text-xl font-bold text-white mt-1 block">
+                    {(publishStatus.views || 0).toLocaleString()}
+                  </span>
                 </div>
+                <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 text-center">
+                  <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">
+                    Like'lar
+                  </span>
+                  <span className="text-xl font-bold text-rose-400 mt-1 block">
+                    {(publishStatus.likes || 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 text-center">
+                  <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">
+                    Izohlar
+                  </span>
+                  <span className="text-xl font-bold text-indigo-400 mt-1 block">
+                    {(publishStatus.comments_count || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Next Milestone Info */}
+              <div className="p-3 bg-slate-900/60 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  🎁 <span>Keyingi sovrin marrasi:</span>
+                </span>
+                <span className="font-semibold text-amber-400">
+                  500 ko'rish (avtomatik tekshiruv har 5 daqiqada)
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Failed State Card */}
+          {publishStatus?.status === 'failed' && (
+            <div className="p-4 rounded-xl border border-rose-800/80 bg-rose-950/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={18} className="text-rose-400" />
+                  <span className="text-sm font-semibold text-white">Joylashda xatolik yuz berdi</span>
+                </div>
+                <span className="text-xs text-rose-400 font-medium">
+                  Qolgan urinishlar: {publishStatus.retries_left}
+                </span>
+              </div>
+              {publishStatus.error && (
+                <p className="text-xs text-rose-300 bg-rose-950/50 p-2.5 rounded-lg border border-rose-900/50">
+                  {publishStatus.error}
+                </p>
               )}
             </div>
           )}
@@ -391,32 +508,32 @@ export const UserVideoPage: React.FC = () => {
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
             {publishStatus?.status === 'failed' && publishStatus.can_retry && (
-              <div className="flex flex-col items-center sm:items-end">
-                <button
-                  onClick={handleRetry}
-                  disabled={retrying}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-50"
-                >
-                  {retrying ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
-                  <span>Qayta urinish</span>
-                </button>
-                <span className="text-xs text-amber-500/80 mt-1">
-                  Qolgan urinishlar: {publishStatus.retries_left}
-                </span>
-              </div>
+              <button
+                onClick={handleRetry}
+                disabled={retrying}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-50"
+              >
+                {retrying ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+                <span>Qayta urinish ({publishStatus.retries_left})</span>
+              </button>
             )}
 
-            <div className="flex flex-col items-center sm:items-end">
+            <div className="flex flex-col items-center sm:items-end w-full sm:w-auto">
               <button
                 onClick={handlePublish}
-                disabled={publishing || isPublishingNow || !isConnected || !publishStatus?.can_publish || !video}
+                disabled={publishing || isPublishingNow || !isConnected || !video}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                 title={publishStatus?.can_publish_reason || (!video ? 'Video yuklanmagan' : '')}
               >
                 {publishing || isPublishingNow ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    <span>Jarayonda...</span>
+                    <span>Jarayonda ({elapsedSeconds}s)...</span>
+                  </>
+                ) : publishStatus?.status === 'published' ? (
+                  <>
+                    <Send size={16} />
+                    <span>Boshqa yangi video joylash</span>
                   </>
                 ) : (
                   <>
@@ -425,11 +542,14 @@ export const UserVideoPage: React.FC = () => {
                   </>
                 )}
               </button>
-              {publishStatus?.can_publish_reason && !publishStatus.can_publish && (
-                <span className="text-xs text-rose-400 mt-1 max-w-[250px] text-center sm:text-right">
-                  {publishStatus.can_publish_reason}
-                </span>
-              )}
+              {publishStatus?.can_publish_reason &&
+                !publishStatus.can_publish &&
+                !isPublishingNow &&
+                publishStatus?.status !== 'published' && (
+                  <span className="text-xs text-rose-400 mt-1 max-w-[250px] text-center sm:text-right">
+                    {publishStatus.can_publish_reason}
+                  </span>
+                )}
             </div>
           </div>
         </div>

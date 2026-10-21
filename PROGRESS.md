@@ -1,5 +1,26 @@
 # Loyiha Rivojlanish Jarayoni (PROGRESS)
 
+## [R0e] Real-Vaqt Joylash Jarayoni (UX) va Meta Webhook Integratsiyasi
+**Sana:** 2026-10-21
+**Holat:** Bajarildi
+
+### Bajarilgan ishlar:
+1. **Real-vaqtli bosqichma-bosqich joylash indikatori (UserVideoPage.tsx):**
+   - Noaniq "Jarayonda... Jarayonda bo'lgan post mavjud" qotib qolish holati to'liq bartaraf etildi.
+   - Foydalanuvchi tugmani bosganda jonli soniya hisoblagichi (`⏱ 12s...`) va Meta video transcoding bosqichlari (1. Tayyorgarlik -> 2. Meta Transcoding -> 3. Nashr etish) vizual aks ettirildi.
+   - Polling tezligi 2 soniyaga tushirildi, Meta nashr qilishi bilanoq natija darhol ekranda chiqadi.
+2. **Nashr etilgan Reel vitrinasi va jonli metrikalar:**
+   - Post nashr bo'lganda (`published`) Instagram'da to'g'ridan-to'g'ri ochish uchun katta gradient havola tugmasi qo'shildi.
+   - Real-vaqt ko'rishlar (views), like'lar va izohlar kartochkalari joriy qilindi.
+   - Keyingi sovrin marrasi (500 ko'rish) va "Boshqa yangi video joylash" imkoniyati berildi.
+3. **Meta Instagram Webhook Endpoint (`/api/instagram/webhook/`):**
+   - Meta Developers ilovasi uchun `GET` challenge tekshiruvi (`hub.mode=subscribe`, `hub.challenge`, `hub.verify_token`) to'liq ulandi.
+   - Real-vaqt hodisalari (`POST`) uchun hodisalarni qabul qilish va `check_post_metrics_task` orqali metrikalarni yangilash ulandi.
+   - `INSTAGRAM_WEBHOOK_VERIFY_TOKEN` sozlamasi qo'shildi.
+4. **Testlar va Validatsiya:**
+   - `InstagramWebhookTestCase` orqali challenge muvaffaqiyati, noto'g'ri token rad etilishi va hodisa qabul qilinishi sinovdan o'tkazildi.
+   - Barcha 146 ta test `docker compose exec web python manage.py test` orqali muvaffaqiyatli o'tdi (OK).
+
 ## [R0d] Instagram Authorize URL Tuzatish va Boshqaruv Buyruqlari
 **Sana:** 2026-10-21
 **Holat:** Bajarildi

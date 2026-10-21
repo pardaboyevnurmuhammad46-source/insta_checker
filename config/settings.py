@@ -214,6 +214,7 @@ INSTAGRAM_SCOPE = os.getenv(
     'INSTAGRAM_SCOPE',
     'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments',
 )
+INSTAGRAM_WEBHOOK_VERIFY_TOKEN = os.getenv('INSTAGRAM_WEBHOOK_VERIFY_TOKEN', 'insta_checker_webhook_token')
 
 # Celery & Redis Configuration
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')

@@ -1434,3 +1434,46 @@ def data_deletion_status(request, confirmation_code):
         "requested_at": record.requested_at,
         "message": message,
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def instagram_webhook(request):
+    """
+    Meta Instagram Webhook endpoint:
+    - GET: hub.challenge tekshiruvi (Meta Developers App Dashboard orqali ulanishda)
+    - POST: real-vaqt hodisalari (mentions, comments, media container yangilanishlari)
+    """
+    from django.http import HttpResponse
+
+    if request.method == 'GET':
+        mode = request.GET.get('hub.mode')
+        token = request.GET.get('hub.verify_token')
+        challenge = request.GET.get('hub.challenge')
+
+        verify_token = getattr(settings, 'INSTAGRAM_WEBHOOK_VERIFY_TOKEN', 'insta_checker_webhook_token')
+        if mode == 'subscribe' and token == verify_token:
+            return HttpResponse(challenge, content_type="text/plain")
+        return HttpResponse("Forbidden", status=status.HTTP_403_FORBIDDEN)
+
+    # POST so'rovi
+    data = request.data
+    logger.info("Instagram Webhook hodisasi qabul qilindi: %s", data)
+
+    try:
+        entries = data.get('entry', []) if isinstance(data, dict) else []
+        for entry in entries:
+            changes = entry.get('changes', [])
+            for change in changes:
+                val = change.get('value', {})
+                media_id = val.get('media_id')
+                if media_id:
+                    post = Post.objects.filter(ig_media_id=str(media_id)).first()
+                    if post:
+                        from .tasks import check_post_metrics_task
+                        check_post_metrics_task.delay(post.id)
+    except Exception as exc:
+        logger.error("Instagram Webhook event qayta ishlashda xatolik: %s", exc)
+
+    return Response({"status": "ok"}, status=status.HTTP_200_OK)
+

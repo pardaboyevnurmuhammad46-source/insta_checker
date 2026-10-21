@@ -28,6 +28,7 @@ from .views import (
     user_publish_status,
     user_retry_publish,
     user_upload_video,
+    instagram_webhook,
     admin_summary,
     admin_users_list,
     admin_user_detail,
@@ -89,6 +90,7 @@ urlpatterns = [
     path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
     path('api/change-password/', change_password, name='change_password'),
     path('api/public/post/<uuid:token>/', user_portal_api, name='user_portal_api'),
+    path('api/instagram/webhook/', instagram_webhook, name='instagram_webhook'),
     path('api/health/', health_check, name='health_check'),
     # Dev / Simulation endpoints (faol faqat INSTAGRAM_DRY_RUN=True va admin bo'lganda)
     path('api/dev/simulate-views/', simulate_views, name='simulate_views'),

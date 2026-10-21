@@ -2653,6 +2653,55 @@ class TokenEncryptionAndSecurityTestCase(TestCase):
                 self.assertIn(missing_key, str(ctx.exception))
 
 
+class InstagramWebhookTestCase(TestCase):
+    def setUp(self):
+        self.verify_token = getattr(settings, 'INSTAGRAM_WEBHOOK_VERIFY_TOKEN', 'insta_checker_webhook_token')
+
+    def test_webhook_challenge_success(self):
+        response = self.client.get('/api/instagram/webhook/', {
+            'hub.mode': 'subscribe',
+            'hub.verify_token': self.verify_token,
+            'hub.challenge': '123456789'
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content.decode('utf-8'), '123456789')
+
+    def test_webhook_challenge_invalid_token(self):
+        response = self.client.get('/api/instagram/webhook/', {
+            'hub.mode': 'subscribe',
+            'hub.verify_token': 'wrong_token',
+            'hub.challenge': '123456789'
+        })
+        self.assertEqual(response.status_code, 403)
+
+    @patch('tracker.tasks.check_post_metrics_task.delay')
+    def test_webhook_post_event_triggers_check(self, mock_task):
+        user = User.objects.create_user(username='hookuser', password='pwd')
+        ig_user = InstagramUser.objects.create(user=user, name='hookuser', status='connected')
+        link = UniqueLink.objects.create(user=ig_user)
+        post = Post.objects.create(link=link, ig_media_id='media_hook_999', status='published')
+
+        payload = {
+            "object": "instagram",
+            "entry": [{
+                "id": "17841400000000000",
+                "time": 1700000000,
+                "changes": [{
+                    "field": "mentions",
+                    "value": {
+                        "media_id": "media_hook_999",
+                        "comment_id": "17900000000"
+                    }
+                }]
+            }]
+        }
+        response = self.client.post('/api/instagram/webhook/', payload, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+        mock_task.assert_called_once_with(post.id)
+
+
+
 
 
 
