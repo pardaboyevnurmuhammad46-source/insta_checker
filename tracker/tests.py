@@ -124,7 +124,8 @@ class ModelsTestCase(TestCase):
 
     def test_unique_link_admin_full_link(self):
         admin_instance = UniqueLinkAdmin(UniqueLink, AdminSite())
-        expected_url = f"http://127.0.0.1:8000/link/{self.link.token}/"
+        base = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
+        expected_url = f"{base}/link/{self.link.token}/"
         self.assertEqual(admin_instance.full_link(self.link), expected_url)
 
 

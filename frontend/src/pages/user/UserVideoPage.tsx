@@ -13,6 +13,9 @@ import {
   AlertCircle,
   Loader2,
   ShieldCheck,
+  UploadCloud,
+  FileVideo,
+  Info,
 } from 'lucide-react';
 
 export const UserVideoPage: React.FC = () => {
@@ -25,6 +28,13 @@ export const UserVideoPage: React.FC = () => {
   const [publishing, setPublishing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [connecting, setConnecting] = useState(false);
+
+  // Video Upload states
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [videoTitle, setVideoTitle] = useState('');
 
   const pollIntervalRef = useRef<any>(null);
 
@@ -41,6 +51,8 @@ export const UserVideoPage: React.FC = () => {
       const videoList = videosRes.data.results || videosRes.data || [];
       if (videoList.length > 0) {
         setVideo(videoList[0]);
+      } else {
+        setVideo(null);
       }
       setPublishStatus(statusRes.data);
     } catch {
@@ -111,7 +123,7 @@ export const UserVideoPage: React.FC = () => {
         status: 'queued',
       });
     } catch (err: any) {
-      showToast(err.detail || 'Videoni joylashda xatolik', 'error');
+      showToast(err.detail || err.error || 'Videoni joylashda xatolik', 'error');
     } finally {
       setPublishing(false);
     }
@@ -124,9 +136,67 @@ export const UserVideoPage: React.FC = () => {
       showToast(res.data.message || 'Qayta urinish navbatga qoʻyildi', 'success');
       setPublishStatus((prev) => (prev ? { ...prev, status: 'queued', error: null } : null));
     } catch (err: any) {
-      showToast(err.detail || 'Qayta urinishda xatolik', 'error');
+      showToast(err.detail || err.error || 'Qayta urinishda xatolik', 'error');
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (!file.name.toLowerCase().endsWith('.mp4')) {
+        showToast('Faqat .mp4 formatidagi videolarni yuklash mumkin', 'error');
+        return;
+      }
+      if (file.size > 100 * 1024 * 1024) {
+        showToast('Video hajmi 100MB dan oshmasligi kerak', 'error');
+        return;
+      }
+      setSelectedFile(file);
+      if (!videoTitle) {
+        setVideoTitle(file.name.replace(/\.[^/.]+$/, ''));
+      }
+    }
+  };
+
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      showToast('Iltimos, video faylni tanlang', 'error');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('title', videoTitle || selectedFile.name);
+
+    try {
+      setUploading(true);
+      setUploadProgress(0);
+
+      const res = await apiClient.post<VideoItem>('/api/user/upload-video/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percent);
+          }
+        },
+      });
+
+      showToast('Shaxsiy videongiz muvaffaqiyatli yuklandi!', 'success');
+      setVideo(res.data);
+      setUploadModalOpen(false);
+      setSelectedFile(null);
+      setVideoTitle('');
+      fetchData();
+    } catch (err: any) {
+      const msg = err.errors?.file?.[0] || err.detail || 'Videoni yuklashda xatolik yuz berdi';
+      showToast(msg, 'error');
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -140,16 +210,27 @@ export const UserVideoPage: React.FC = () => {
   }
 
   const isPublishingNow = publishStatus?.status === 'queued' || publishStatus?.status === 'publishing';
+  const isPersonalVideo = Boolean(video?.owner && video.owner === user?.instagram_user?.id);
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-          Mening Videom
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Instagram akkauntingizga yuklanadigan video va joylash holati
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            Mening Videom
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Instagram akkauntingizga yuklanadigan video va joylash holati
+          </p>
+        </div>
+
+        <button
+          onClick={() => setUploadModalOpen(true)}
+          className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition border border-slate-700 shadow-sm"
+        >
+          <UploadCloud size={16} className="text-indigo-400" />
+          <span>{video ? 'Yangi video yuklash' : 'Video yuklash'}</span>
+        </button>
       </div>
 
       {/* Account Status Banner */}
@@ -197,30 +278,61 @@ export const UserVideoPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <Film size={20} className="text-indigo-400" />
             <h2 className="font-semibold text-white text-base">
-              {video?.title || 'Umumiy Promo Video'}
+              {video?.title || 'Video topilmadi'}
             </h2>
           </div>
-          {video?.is_default && (
-            <span className="text-xs font-medium px-2.5 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-800">
-              Umumiy video
+          {video && (
+            <span
+              className={`text-xs font-medium px-2.5 py-0.5 rounded border ${
+                isPersonalVideo
+                  ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                  : 'bg-indigo-950 text-indigo-400 border-indigo-800'
+              }`}
+            >
+              {isPersonalVideo ? 'Sizning shaxsiy videongiz' : 'Umumiy (Default) video'}
             </span>
           )}
         </div>
 
         <div className="p-6 space-y-6">
           {video?.video_url || video?.file ? (
-            <div className="bg-slate-900 rounded-xl overflow-hidden max-w-lg mx-auto border border-slate-800 aspect-[9/16] max-h-[480px] flex items-center justify-center">
-              <video
-                controls
-                src={video.video_url || video.file}
-                className="w-full h-full object-contain"
-                preload="metadata"
-              />
+            <div className="space-y-4">
+              <div className="bg-slate-900 rounded-xl overflow-hidden max-w-sm mx-auto border border-slate-800 aspect-[9/16] max-h-[460px] flex items-center justify-center shadow-lg">
+                <video
+                  controls
+                  src={video.video_url || video.file}
+                  className="w-full h-full object-contain"
+                  preload="metadata"
+                />
+              </div>
+
+              {!isPersonalVideo && (
+                <div className="flex items-start gap-2.5 p-3.5 bg-indigo-950/40 border border-indigo-900/50 rounded-xl text-xs text-indigo-300 max-w-lg mx-auto">
+                  <Info size={16} className="mt-0.5 shrink-0 text-indigo-400" />
+                  <span>
+                    Hozircha o'zingizning shaxsiy videongizni yuklamagansiz. Joylash tugmasini bossangiz, tizimning rasmiy <strong>umumiy promo videosi</strong> Reels qilib joylanadi. Istasangiz, yuqoridagi <strong>"Yangi video yuklash"</strong> tugmasi orqali o'z videongizni qo'shishingiz mumkin.
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="h-64 bg-slate-900 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-slate-500 text-sm">
-              <Film size={36} className="mb-2 opacity-50" />
-              <span>Hozircha faol video topilmadi</span>
+            <div className="p-8 bg-slate-900/60 rounded-xl border border-dashed border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
+              <div className="p-3 bg-slate-800 rounded-full text-slate-400">
+                <Film size={36} />
+              </div>
+              <div>
+                <h3 className="text-white font-semibold text-sm">Hozircha video mavjud emas</h3>
+                <p className="text-slate-400 text-xs mt-1 max-w-sm">
+                  Instagram Reelsga joylash uchun shaxsiy videongizni (.mp4, vertikal 9:16) yuklang.
+                </p>
+              </div>
+              <button
+                onClick={() => setUploadModalOpen(true)}
+                className="mt-2 inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold transition"
+              >
+                <UploadCloud size={15} />
+                <span>Video yuklash</span>
+              </button>
             </div>
           )}
 
@@ -297,9 +409,9 @@ export const UserVideoPage: React.FC = () => {
             <div className="flex flex-col items-center sm:items-end">
               <button
                 onClick={handlePublish}
-                disabled={publishing || isPublishingNow || !isConnected || !publishStatus?.can_publish}
+                disabled={publishing || isPublishingNow || !isConnected || !publishStatus?.can_publish || !video}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                title={publishStatus?.can_publish_reason || ''}
+                title={publishStatus?.can_publish_reason || (!video ? 'Video yuklanmagan' : '')}
               >
                 {publishing || isPublishingNow ? (
                   <>
@@ -322,6 +434,118 @@ export const UserVideoPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Video Upload Modal */}
+      {uploadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-2">
+                <FileVideo className="text-indigo-400" size={20} />
+                <h3 className="font-semibold text-white text-base">Shaxsiy Video Yuklash</h3>
+              </div>
+              <button
+                onClick={() => {
+                  if (!uploading) {
+                    setUploadModalOpen(false);
+                    setSelectedFile(null);
+                  }
+                }}
+                className="text-slate-400 hover:text-white text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUploadSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  Video Sarlavhasi (ixtiyoriy)
+                </label>
+                <input
+                  type="text"
+                  value={videoTitle}
+                  onChange={(e) => setVideoTitle(e.target.value)}
+                  placeholder="Masalan: Mening yangi promo roligim"
+                  disabled={uploading}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500 transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  Video Fayl (.mp4, vertikal 9:16, max 100MB)
+                </label>
+                <div className="border-2 border-dashed border-slate-800 hover:border-slate-700 bg-slate-950 rounded-xl p-5 text-center transition">
+                  <input
+                    type="file"
+                    id="user-video-file"
+                    accept="video/mp4"
+                    disabled={uploading}
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <label htmlFor="user-video-file" className="cursor-pointer flex flex-col items-center">
+                    <UploadCloud size={32} className="text-indigo-400 mb-2" />
+                    <span className="text-xs font-semibold text-white">
+                      {selectedFile ? selectedFile.name : 'Video faylni tanlang'}
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-1">
+                      MP4 (H.264, AAC), 9:16 vertikal, 3 soniyadan 15 daqiqagacha
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {uploadProgress !== null && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>Yuklanmoqda...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-indigo-600 h-2 rounded-full transition-all duration-200"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-3">
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => {
+                    setUploadModalOpen(false);
+                    setSelectedFile(null);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploading || !selectedFile}
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Yuklanmoqda...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud size={14} />
+                      <span>Yuklash</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

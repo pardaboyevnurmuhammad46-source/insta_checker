@@ -22,6 +22,7 @@ class InstagramUserSerializer(serializers.ModelSerializer):
 class VideoSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source='owner.name', read_only=True)
     video_url = serializers.SerializerMethodField()
+    title = serializers.CharField(required=False, allow_blank=True, default='')
 
     class Meta:
         model = Video
@@ -30,6 +31,11 @@ class VideoSerializer(serializers.ModelSerializer):
 
     def get_video_url(self, obj):
         return obj.url
+
+    def validate(self, attrs):
+        if not attrs.get('title') and attrs.get('file'):
+            attrs['title'] = getattr(attrs['file'], 'name', 'Video')
+        return attrs
 
     def validate_file(self, value):
         if not value:
@@ -54,10 +60,19 @@ class UniqueLinkSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.name', read_only=True)
     full_link = serializers.SerializerMethodField()
     video_url = serializers.SerializerMethodField()
+    video = serializers.PrimaryKeyRelatedField(
+        queryset=Video.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    video_file = serializers.FileField(write_only=True, required=False)
 
     class Meta:
         model = UniqueLink
-        fields = ['id', 'user', 'user_name', 'token', 'full_link', 'video', 'video_url', 'status', 'expires_at', 'created_at']
+        fields = [
+            'id', 'user', 'user_name', 'token', 'full_link',
+            'video', 'video_file', 'video_url', 'status', 'expires_at', 'created_at'
+        ]
         read_only_fields = ['token', 'status', 'created_at']
 
     def get_full_link(self, obj):
@@ -65,6 +80,51 @@ class UniqueLinkSerializer(serializers.ModelSerializer):
 
     def get_video_url(self, obj):
         return obj.video.url if obj.video else ''
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        video_val = data.get('video')
+        if hasattr(video_val, 'read') or hasattr(video_val, 'chunks'):
+            data['video_file'] = video_val
+            data.pop('video', None)
+        elif video_val == '' or video_val == 'null':
+            data.pop('video', None)
+
+        return super().to_internal_value(data)
+
+    def validate_video_file(self, value):
+        if not value:
+            return value
+        file_name = getattr(value, 'name', '')
+        if not file_name.lower().endswith('.mp4'):
+            raise serializers.ValidationError("Faqat .mp4 formatidagi videolar qabul qilinadi.")
+        if value.size == 0:
+            raise serializers.ValidationError("Video fayl bo'sh bo'lishi mumkin emas.")
+        max_bytes = getattr(settings, 'MAX_VIDEO_SIZE_BYTES', 100 * 1024 * 1024)
+        max_mb = getattr(settings, 'MAX_VIDEO_SIZE_MB', 100)
+        if value.size > max_bytes:
+            raise serializers.ValidationError(f"Video hajmi {max_mb}MB dan oshmasligi kerak.")
+        return value
+
+    def create(self, validated_data):
+        video_file = validated_data.pop('video_file', None)
+        user = validated_data.get('user')
+        if video_file:
+            title = getattr(video_file, 'name', 'Uploaded Video')
+            new_video = Video.objects.create(
+                title=title,
+                file=video_file,
+                owner=user,
+                is_active=True,
+            )
+            validated_data['video'] = new_video
+        elif not validated_data.get('video'):
+            from .models import get_video_for_user
+            chosen = get_video_for_user(user)
+            if chosen:
+                validated_data['video'] = chosen
+
+        return super().create(validated_data)
 
 
 class PostSerializer(serializers.ModelSerializer):

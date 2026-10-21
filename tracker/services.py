@@ -205,11 +205,32 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         raise InstagramPublishError(err_msg)
 
     # 1-bosqichdagi video tanlash qoidasi orqali videoni aniqlash
-    # if not link.video:
-    #     raise InstagramPublishError("Joylash uchun video fayl mavjud emas.")
-    chosen_video = get_video_for_user(user) or link.video
+    chosen_video = link.video or get_video_for_user(user)
     if not chosen_video:
-        raise InstagramPublishError("Joylash uchun video fayl mavjud emas.")
+        err_msg = "Joylash uchun video fayl mavjud emas. Linkka video biriktirilmagan va tizimda faol umumiy (default) video ham yo'q."
+        post, _ = Post.objects.get_or_create(link=link)
+        post.status = 'failed'
+        post.error = err_msg
+        post.save(update_fields=['status', 'error'])
+        link.status = 'failed'
+        link.save(update_fields=['status'])
+        raise InstagramPublishError(err_msg)
+
+    # Video faylining mavjudligi va hajm tekshiruvi (dummy 4-10 baytli fayllar uchun)
+    try:
+        file_size = chosen_video.file.size if chosen_video.file else 0
+    except Exception:
+        file_size = 0
+
+    if not chosen_video.file or file_size == 0:
+        err_msg = f"Joylash uchun video fayli topilmadi yoki bo'sh ({chosen_video.title})."
+        post, _ = Post.objects.get_or_create(link=link)
+        post.status = 'failed'
+        post.error = err_msg
+        post.save(update_fields=['status', 'error'])
+        link.status = 'failed'
+        link.save(update_fields=['status'])
+        raise InstagramPublishError(err_msg)
 
     if link.video != chosen_video:
         link.video = chosen_video
@@ -224,10 +245,11 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     post.status = 'publishing'
     post.save(update_fields=['status'])
 
-    # video_url = link.video.url
+    # video_url ommaviy tashqi URL bo'lishi shart (Instagram serveri yuklashi uchun)
     video_url = chosen_video.url
     if not video_url.startswith(('http://', 'https://')):
-        base = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
+        base = getattr(settings, 'PUBLIC_BASE_URL', '') or getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
+        base = base.rstrip('/')
         video_url = f"{base}{video_url}"
 
     try:

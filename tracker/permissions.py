@@ -85,3 +85,4 @@ class IsAdminOrReadOnlyOwnerVideo(BasePermission):
         if obj.is_default and obj.is_active:
             return True
         return False
+

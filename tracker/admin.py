@@ -48,7 +48,9 @@ class UniqueLinkAdmin(admin.ModelAdmin):
     actions = ['publish_reels_action']
 
     def full_link(self, obj):
-        return f"http://127.0.0.1:8000/link/{obj.token}/"
+        from django.conf import settings
+        base = getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
+        return f"{base}/link/{obj.token}/"
     full_link.short_description = "To'liq link"
 
     @admin.action(description="Tanlangan linklar uchun videoni Reels qilib joylash")

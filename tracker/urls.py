@@ -27,6 +27,7 @@ from .views import (
     user_publish_video,
     user_publish_status,
     user_retry_publish,
+    user_upload_video,
     admin_summary,
     admin_users_list,
     admin_user_detail,
@@ -74,6 +75,7 @@ urlpatterns = [
     path('api/user/publish/', user_publish_video, name='user_publish_video'),
     path('api/user/publish-status/', user_publish_status, name='user_publish_status'),
     path('api/user/retry/', user_retry_publish, name='user_retry_publish'),
+    path('api/user/upload-video/', user_upload_video, name='user_upload_video'),
 
     # Admin endpoints
     path('api/admin/summary/', admin_summary, name='admin_summary'),

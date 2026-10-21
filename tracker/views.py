@@ -989,9 +989,15 @@ def user_connect_instagram(request):
         user=request.user,
         defaults={'name': request.user.username}
     )
+    from .models import get_video_for_user
+    chosen_video = get_video_for_user(ig_user)
+
     link = UniqueLink.objects.filter(user=ig_user, status__in=['pending', 'opened']).order_by('-id').first()
     if not link:
-        link = UniqueLink.objects.create(user=ig_user)
+        link = UniqueLink.objects.create(user=ig_user, video=chosen_video)
+    elif not link.video and chosen_video:
+        link.video = chosen_video
+        link.save(update_fields=['video'])
 
     auth_url = build_instagram_auth_url(str(link.token))
     return Response({
@@ -1015,6 +1021,14 @@ def user_publish_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    from .models import get_video_for_user
+    chosen_video = get_video_for_user(ig_user)
+    if not chosen_video:
+        return Response(
+            {"error": "Joylash uchun video topilmadi. Iltimos, avval 'Mening videom' sahifasida video yuklang yoki admin umumiy video yuklashini kuting."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     # Takroriy bosishdan himoya
     active_post = Post.objects.filter(
         link__user=ig_user,
@@ -1029,7 +1043,11 @@ def user_publish_video(request):
 
     link = UniqueLink.objects.filter(user=ig_user, post__isnull=True).order_by('-id').first()
     if not link:
-        link = UniqueLink.objects.create(user=ig_user)
+        link = UniqueLink.objects.create(user=ig_user, video=chosen_video)
+    else:
+        if link.video != chosen_video:
+            link.video = chosen_video
+            link.save(update_fields=['video'])
 
     post, _ = Post.objects.get_or_create(link=link)
     post.status = 'queued'
@@ -1044,6 +1062,27 @@ def user_publish_video(request):
         "status": post.status,
         "link_token": str(link.token)
     }, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def user_upload_video(request):
+    """
+    Foydalanuvchi o'zining shaxsiy Reels videosini yuklaydi.
+    """
+    ig_user, _ = InstagramUser.objects.get_or_create(
+        user=request.user,
+        defaults={'name': request.user.username}
+    )
+    if not request.FILES.get('file'):
+        return Response({"error": "Video fayl tanlanishi shart."}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = VideoSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    video = serializer.save(owner=ig_user, is_default=False, is_active=True)
+    return Response(VideoSerializer(video).data, status=status.HTTP_201_CREATED)
 
 
 @extend_schema(responses={200: UserPublishStatusOutputSerializer})
@@ -1075,10 +1114,18 @@ def user_publish_status(request):
         base_response["can_publish_reason"] = "Instagram hisob ulanmagan."
         return Response(UserPublishStatusOutputSerializer(base_response).data)
 
+    from .models import get_video_for_user
+    chosen_video = get_video_for_user(ig_user)
+    has_video = bool(chosen_video)
+
     post = Post.objects.filter(link__user=ig_user).order_by('-id').first()
     
     if not post:
-        base_response["can_publish"] = True
+        if not has_video:
+            base_response["can_publish"] = False
+            base_response["can_publish_reason"] = "Joylash uchun video mavjud emas. Iltimos, video yuklang."
+        else:
+            base_response["can_publish"] = True
         return Response(UserPublishStatusOutputSerializer(base_response).data)
 
     retries_left = max(0, 3 - post.retry_count)
@@ -1089,6 +1136,9 @@ def user_publish_status(request):
     
     if post.status in ['queued', 'publishing']:
         can_publish_reason = "Jarayonda bo'lgan post mavjud."
+    elif not has_video:
+        can_publish = False
+        can_publish_reason = "Joylash uchun video mavjud emas. Iltimos, video yuklang."
     else:
         can_publish = True
 

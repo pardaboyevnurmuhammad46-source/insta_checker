@@ -1,5 +1,24 @@
 # Loyiha Rivojlanish Jarayoni (PROGRESS)
 
+## [R0d] Instagram Authorize URL Tuzatish va Boshqaruv Buyruqlari
+**Sana:** 2026-10-21
+**Holat:** Bajarildi
+
+### Bajarilgan ishlar:
+1. **Instagram Business Login Authorize URL parametrlari Meta standartiga keltirildi:**
+   - `tracker/instagram_client.py` dagi `RealInstagramClient.build_auth_url` ga `enable_fb_login=0` va `force_authentication=1` parametrlari qo'shildi. Bu parametrlar brauzerda Facebook SSO o'rniga to'g'ridan-to'g'ri Instagram Business Login interfeysi ochilishini ta'minlaydi va "Sorry, this page isn't available" xatosini oldini oladi.
+2. **`show_auth_url` boshqaruv buyrug'i yaratildi:**
+   - `python manage.py show_auth_url <user_id>` buyrug'i yaratildi.
+   - Foydalanuvchi uchun yangi `UniqueLink` yaratib, xavfsiz holda to'liq Instagram Authorize URL ni chiqaradi (`client_secret` yoki maxfiy tokenlar chiqmaydi).
+3. **`make_link` boshqaruv buyrug'i yaratildi:**
+   - `python manage.py make_link <user_id yoki ism> [--video <id>]` buyrug'i yaratildi.
+   - Tanlangan foydalanuvchi va video uchun to'liq https havolani (`settings.PUBLIC_BASE_URL` yoki `SITE_URL` asosida) chiqaradi.
+4. **Django Admin `UniqueLinkAdmin` to'g'rilandi:**
+   - `tracker/admin.py` dagi `full_link` dagi hardcoded `127.0.0.1:8000` olib tashlanib, `settings.SITE_URL` ga almashtirildi.
+5. **Testlar va Validatsiya:**
+   - `tracker/tests.py` dagi admin link testi `settings.SITE_URL` ga moslandi.
+   - Barcha 143 ta unit testlar `docker compose exec web python manage.py test` orqali muvaffaqiyatli o'tdi (OK).
+
 ## [R0] Instagram Haqiqiy Rejimga O'tkazish (graph.instagram.com)
 **Sana:** 2026-10-21
 **Holat:** Bajarildi

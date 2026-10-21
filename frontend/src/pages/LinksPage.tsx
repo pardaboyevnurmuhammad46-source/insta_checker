@@ -18,6 +18,9 @@ export const LinksPage: React.FC = () => {
   // Create Link Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<number | ''>('');
+  const [videoSource, setVideoSource] = useState<'default' | 'existing' | 'upload'>('default');
+  const [availableVideos, setAvailableVideos] = useState<any[]>([]);
+  const [selectedVideoId, setSelectedVideoId] = useState<number | ''>('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [expiresAt, setExpiresAt] = useState('');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -52,11 +55,17 @@ export const LinksPage: React.FC = () => {
     fetchLinks();
   }, [fetchLinks]);
 
-  // Fetch users for dropdown when modal opens
+  // Fetch users and videos for dropdown when modal opens
   useEffect(() => {
-    if (isModalOpen && users.length === 0) {
-      apiClient.get<PaginatedResponse<InstagramUser>>('/api/users/?page_size=100').then((res) => {
-        setUsers(res.data.results);
+    if (isModalOpen) {
+      if (users.length === 0) {
+        apiClient.get<PaginatedResponse<InstagramUser>>('/api/users/?page_size=100').then((res) => {
+          setUsers(res.data.results);
+        });
+      }
+      apiClient.get('/api/videos/?page_size=100').then((res) => {
+        const list = res.data.results || res.data || [];
+        setAvailableVideos(list);
       });
     }
   }, [isModalOpen, users.length]);
@@ -83,36 +92,52 @@ export const LinksPage: React.FC = () => {
 
   const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUserId || !videoFile) {
-      showToast('Foydalanuvchi va video tanlanishi shart', 'error');
+    if (!selectedUserId) {
+      showToast('Iltimos, foydalanuvchini tanlang', 'error');
       return;
     }
 
-    if (!videoFile.name.toLowerCase().endsWith('.mp4')) {
-      showToast('Faqat .mp4 formatidagi video qabul qilinadi', 'error');
-      return;
-    }
-
-    if (videoFile.size > 100 * 1024 * 1024) {
-      showToast('Video hajmi 100MB dan oshmasligi kerak', 'error');
-      return;
+    if (videoSource === 'upload') {
+      if (!videoFile) {
+        showToast('Iltimos, yangi video faylni tanlang', 'error');
+        return;
+      }
+      if (!videoFile.name.toLowerCase().endsWith('.mp4')) {
+        showToast('Faqat .mp4 formatidagi video qabul qilinadi', 'error');
+        return;
+      }
+      if (videoFile.size > 100 * 1024 * 1024) {
+        showToast('Video hajmi 100MB dan oshmasligi kerak', 'error');
+        return;
+      }
+    } else if (videoSource === 'existing') {
+      if (!selectedVideoId) {
+        showToast('Iltimos, kutubxonadan videoni tanlang', 'error');
+        return;
+      }
     }
 
     const formData = new FormData();
     formData.append('user', selectedUserId.toString());
-    formData.append('video', videoFile);
+
+    if (videoSource === 'upload' && videoFile) {
+      formData.append('video', videoFile);
+    } else if (videoSource === 'existing' && selectedVideoId) {
+      formData.append('video', selectedVideoId.toString());
+    }
+
     if (expiresAt) {
       formData.append('expires_at', new Date(expiresAt).toISOString());
     }
 
     try {
       setSubmitting(true);
-      setUploadProgress(0);
+      setUploadProgress(videoSource === 'upload' ? 0 : null);
 
       await apiClient.post('/api/links/', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
+          if (progressEvent.total && videoSource === 'upload') {
             const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             setUploadProgress(percent);
           }
@@ -122,6 +147,8 @@ export const LinksPage: React.FC = () => {
       showToast('Link muvaffaqiyatli yaratildi', 'success');
       setIsModalOpen(false);
       setSelectedUserId('');
+      setVideoSource('default');
+      setSelectedVideoId('');
       setVideoFile(null);
       setExpiresAt('');
       setUploadProgress(null);
@@ -289,29 +316,89 @@ export const LinksPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Reels Video fayli (.mp4, max 100MB)
+                  Reels Videosini Tanlash
                 </label>
-                <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:bg-slate-50 transition-colors">
-                  <input
-                    type="file"
-                    required
-                    accept=".mp4"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setVideoFile(e.target.files[0]);
-                      }
-                    }}
-                    className="hidden"
-                    id="video-upload"
-                  />
-                  <label htmlFor="video-upload" className="cursor-pointer flex flex-col items-center">
-                    <UploadCloud size={32} className="text-slate-400 mb-2" />
-                    <span className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                      {videoFile ? videoFile.name : 'Video faylni tanlang'}
-                    </span>
-                    <span className="text-xs text-slate-400 mt-1">MP4 formatida, 100MB gacha</span>
-                  </label>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setVideoSource('default')}
+                    className={`py-2 px-2 text-xs font-medium rounded-lg border text-center transition ${
+                      videoSource === 'default'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    Avtomatik (Default)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVideoSource('existing')}
+                    className={`py-2 px-2 text-xs font-medium rounded-lg border text-center transition ${
+                      videoSource === 'existing'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    Kutubxonadan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVideoSource('upload')}
+                    className={`py-2 px-2 text-xs font-medium rounded-lg border text-center transition ${
+                      videoSource === 'upload'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    Yangi yuklash
+                  </button>
                 </div>
+
+                {videoSource === 'default' && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
+                    Foydalanuvchining o'z shaxsiy videosi (agar bor bo'lsa) yoki tizimning umumiy promo videosi avtomatik biriktiriladi.
+                  </div>
+                )}
+
+                {videoSource === 'existing' && (
+                  <div>
+                    <select
+                      value={selectedVideoId}
+                      onChange={(e) => setSelectedVideoId(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                    >
+                      <option value="">Videoni tanlang</option>
+                      {availableVideos.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.title} {v.is_default ? '(Umumiy default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {videoSource === 'upload' && (
+                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:bg-slate-50 transition-colors">
+                    <input
+                      type="file"
+                      accept=".mp4"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setVideoFile(e.target.files[0]);
+                        }
+                      }}
+                      className="hidden"
+                      id="video-upload"
+                    />
+                    <label htmlFor="video-upload" className="cursor-pointer flex flex-col items-center">
+                      <UploadCloud size={32} className="text-slate-400 mb-2" />
+                      <span className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                        {videoFile ? videoFile.name : 'Video faylni tanlang'}
+                      </span>
+                      <span className="text-xs text-slate-400 mt-1">MP4 formatida, 100MB gacha</span>
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div>
