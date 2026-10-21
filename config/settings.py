@@ -149,21 +149,6 @@ STATIC_ROOT = BASE_DIR / 'static'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# CSRF Trusted Origins
-# raw_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000,http://localhost,http://127.0.0.1')
-# CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf.split(',') if origin.strip()]
-# site_url = os.getenv('SITE_URL')
-# if site_url and site_url not in CSRF_TRUSTED_ORIGINS:
-#     CSRF_TRUSTED_ORIGINS.append(site_url)
-raw_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000,http://localhost,http://127.0.0.1')
-CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf.split(',') if origin.strip()]
-for default_origin in ['http://localhost:8080', 'http://127.0.0.1:8080']:
-    if default_origin not in CSRF_TRUSTED_ORIGINS:
-        CSRF_TRUSTED_ORIGINS.append(default_origin)
-site_url = os.getenv('SITE_URL')
-if site_url and site_url not in CSRF_TRUSTED_ORIGINS:
-    CSRF_TRUSTED_ORIGINS.append(site_url)
-
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
@@ -204,16 +189,27 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
-# CORS
+# CORS & CSRF
 cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
+
+PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+CSRF_TRUSTED_ORIGINS = [PUBLIC_BASE_URL] if PUBLIC_BASE_URL else []
+for default_origin in ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://localhost:8000', 'http://127.0.0.1:8000']:
+    if default_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(default_origin)
+
+if PUBLIC_BASE_URL and PUBLIC_BASE_URL not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append(PUBLIC_BASE_URL)
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Instagram & Token shifrlash sozlamalari
 INSTAGRAM_APP_ID = os.environ['INSTAGRAM_APP_ID']
 INSTAGRAM_APP_SECRET = os.environ['INSTAGRAM_APP_SECRET']
 INSTAGRAM_ACCESS_TOKEN = os.environ.get('INSTAGRAM_ACCESS_TOKEN', '')
 TOKEN_ENCRYPTION_KEY = os.environ['TOKEN_ENCRYPTION_KEY']
-INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', 'http://127.0.0.1:8000/oauth/callback/')
+INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', f"{PUBLIC_BASE_URL}/oauth/callback/" if PUBLIC_BASE_URL else 'http://127.0.0.1:8000/oauth/callback/')
 INSTAGRAM_SCOPE = os.getenv(
     'INSTAGRAM_SCOPE',
     'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments',
@@ -242,7 +238,7 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-SITE_URL = os.getenv('SITE_URL', 'http://127.0.0.1:8000')
+SITE_URL = os.getenv('SITE_URL', PUBLIC_BASE_URL if PUBLIC_BASE_URL else 'http://127.0.0.1:8000')
 
 # Sovrinlar (Prize) marralari (ko'rishlar soni bo'yicha)
 raw_milestones = os.getenv('PRIZE_MILESTONES', '500,1000,5000,10000,50000,100000')
