@@ -27,6 +27,8 @@ def publish_reels_task(self, link_id: int, caption: str = ''):
     try:
         post = publish_reels_for_link(link_id=link_id, caption=caption)
         logger.info("Reels muvaffaqiyatli yuklandi: post_id=%s, media_id=%s", post.id, post.ig_media_id)
+        # Yangi chiqqan post statistikasini 15 soniyadan so'ng darhol birinchi marta tekshirish
+        check_post_metrics_task.apply_async(args=[post.id], countdown=15)
         return {"post_id": post.id, "ig_media_id": post.ig_media_id, "status": post.status}
     except InstagramPublishError as exc:
         logger.error("Reels yuklashda xatolik (link_id=%s): %s", link_id, mask_sensitive_data(str(exc)))

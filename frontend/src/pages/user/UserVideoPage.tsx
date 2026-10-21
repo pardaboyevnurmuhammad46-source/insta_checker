@@ -8,6 +8,7 @@ import {
   Camera as Instagram,
   Send,
   RotateCcw,
+  RefreshCw,
   ExternalLink,
   CheckCircle2,
   AlertCircle,
@@ -28,6 +29,7 @@ export const UserVideoPage: React.FC = () => {
   const [publishing, setPublishing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [refreshingMetrics, setRefreshingMetrics] = useState(false);
 
   // Video Upload states
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -155,6 +157,26 @@ export const UserVideoPage: React.FC = () => {
       showToast(err.detail || err.error || 'Qayta urinishda xatolik', 'error');
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const handleRefreshMetrics = async () => {
+    if (!publishStatus?.post_id) return;
+    try {
+      setRefreshingMetrics(true);
+      await apiClient.post(`/api/posts/${publishStatus.post_id}/check-metrics/`);
+      showToast('Statistika tekshiruvi boshlandi...', 'info');
+      setTimeout(async () => {
+        try {
+          const res = await apiClient.get<PublishStatus>('/api/user/publish-status/');
+          setPublishStatus(res.data);
+          showToast('Statistika yangilandi', 'success');
+        } catch {}
+        setRefreshingMetrics(false);
+      }, 2000);
+    } catch (err: any) {
+      showToast(err.detail || 'Statistikani yangilab boʻlmadi', 'error');
+      setRefreshingMetrics(false);
     }
   };
 
@@ -443,6 +465,20 @@ export const UserVideoPage: React.FC = () => {
                     <ExternalLink size={14} />
                   </a>
                 )}
+              </div>
+
+              {/* Metrics Grid Header */}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-semibold text-slate-300">Statistika va ko'rsatkichlar:</span>
+                <button
+                  onClick={handleRefreshMetrics}
+                  disabled={refreshingMetrics}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 transition disabled:opacity-50"
+                  title="Statistikani Instagramdan hozir tekshirish"
+                >
+                  <RefreshCw size={13} className={refreshingMetrics ? "animate-spin" : ""} />
+                  <span>Statistikani yangilash</span>
+                </button>
               </div>
 
               {/* Metrics Grid */}

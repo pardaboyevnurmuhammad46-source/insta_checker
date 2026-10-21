@@ -78,7 +78,9 @@ export const AdminPostsPage: React.FC = () => {
       setCheckingMetricsId(postId);
       const res = await apiClient.post(`/api/posts/${postId}/check-metrics/`);
       showToast(res.data.message || 'Statistikani tekshirish navbatga qoʻyildi', 'success');
-      fetchPosts();
+      setTimeout(() => {
+        fetchPosts();
+      }, 2000);
     } catch (err: any) {
       showToast(err.detail || 'Xatolik yuz berdi', 'error');
     } finally {
