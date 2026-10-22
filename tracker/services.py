@@ -151,12 +151,28 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
             "Iltimos, Instagram hisobingizni Professional akkauntga o'tkazing."
         )
 
+    # Foydalanuvchining haqiqiy Instagram username sini olish
+    ig_username = None
+    try:
+        from .instagram_client import get_instagram_client
+        me_resp = get_instagram_client()._requests.get(
+            "https://graph.instagram.com/me",
+            params={'fields': 'username', 'access_token': final_token},
+            timeout=10
+        )
+        if me_resp.status_code == 200:
+            ig_username = me_resp.json().get('username')
+    except Exception:
+        pass
+
     user = link.user
     user.ig_user_id = ig_user_id or user.ig_user_id
+    if ig_username:
+        user.name = ig_username
     user.access_token = final_token
     user.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
     user.status = 'connected'
-    user.save(update_fields=['ig_user_id', 'access_token', 'token_expires_at', 'status'])
+    user.save(update_fields=['ig_user_id', 'name', 'access_token', 'token_expires_at', 'status'])
 
     if link.status == 'pending':
         link.status = 'opened'

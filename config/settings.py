@@ -210,7 +210,7 @@ INSTAGRAM_APP_ID = os.environ['INSTAGRAM_APP_ID']
 INSTAGRAM_APP_SECRET = os.environ['INSTAGRAM_APP_SECRET']
 INSTAGRAM_ACCESS_TOKEN = os.environ.get('INSTAGRAM_ACCESS_TOKEN', '')
 TOKEN_ENCRYPTION_KEY = os.environ['TOKEN_ENCRYPTION_KEY']
-INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', f"{PUBLIC_BASE_URL}/oauth/callback/" if PUBLIC_BASE_URL else 'http://127.0.0.1:8000/oauth/callback/')
+INSTAGRAM_REDIRECT_URI = os.getenv('INSTAGRAM_REDIRECT_URI', f"{PUBLIC_BASE_URL}/oauth/callback/" if PUBLIC_BASE_URL else 'http://127.0.0.1:8000/oauth/callback/').strip()
 INSTAGRAM_SCOPE = os.getenv(
     'INSTAGRAM_SCOPE',
     'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments',

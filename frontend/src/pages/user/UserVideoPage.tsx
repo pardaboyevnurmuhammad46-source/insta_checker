@@ -32,6 +32,9 @@ export const UserVideoPage: React.FC = () => {
   const [publishing, setPublishing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
+  const [customTokenInput, setCustomTokenInput] = useState('');
+  const [connectingToken, setConnectingToken] = useState(false);
   const [refreshingMetrics, setRefreshingMetrics] = useState(false);
 
   // Video Upload states
@@ -210,31 +213,35 @@ export const UserVideoPage: React.FC = () => {
   const handleConnectInstagram = async () => {
     try {
       setConnecting(true);
-      // 1. Tizimdagi tasdiqlangan Instagram tokeni orqali to'g'ridan-to'g'ri ulash
-      const res = await apiClient.post('/api/user/connect-instagram/');
-      if (res.data.status === 'connected') {
-        showToast(res.data.message || 'Instagram akkauntingiz muvaffaqiyatli ulandi!', 'success');
-        await refreshProfile();
-        return;
-      }
-      // 2. Agar to'g'ridan-to'g'ri ulanmasa, OAuth URL ga o'tish
+      const res = await apiClient.get('/api/user/connect-instagram/');
       if (res.data.auth_url) {
         window.location.href = res.data.auth_url;
+      } else {
+        showToast("Instagram avtorizatsiya havolasini olib bo'lmadi", 'error');
       }
     } catch (err: any) {
-      try {
-        const getRes = await apiClient.get('/api/user/connect-instagram/');
-        if (getRes.data.status === 'connected') {
-          showToast('Instagram akkaunti ulangan!', 'success');
-          await refreshProfile();
-        } else if (getRes.data.auth_url) {
-          window.location.href = getRes.data.auth_url;
-        }
-      } catch (getErr: any) {
-        showToast(err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
-      }
+      showToast(err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleConnectWithToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customTokenInput.trim()) return;
+    try {
+      setConnectingToken(true);
+      const res = await apiClient.post('/api/user/connect-instagram/', {
+        access_token: customTokenInput.trim(),
+      });
+      showToast(res.data.message || 'Instagram hisobingiz muvaffaqiyatli ulandi!', 'success');
+      setTokenModalOpen(false);
+      setCustomTokenInput('');
+      await refreshProfile();
+    } catch (err: any) {
+      showToast(err.detail || err.error || 'Tokenni tekshirishda xatolik yuz berdi', 'error');
+    } finally {
+      setConnectingToken(false);
     }
   };
 
@@ -414,14 +421,22 @@ export const UserVideoPage: React.FC = () => {
         </div>
 
         {!isConnected && (
-          <button
-            onClick={handleConnectInstagram}
-            disabled={connecting}
-            className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50"
-          >
-            {connecting ? <Loader2 size={16} className="animate-spin" /> : <Instagram size={16} />}
-            <span>Instagramga ulash</span>
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-2">
+            <button
+              onClick={handleConnectInstagram}
+              disabled={connecting}
+              className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50"
+            >
+              {connecting ? <Loader2 size={16} className="animate-spin" /> : <Instagram size={16} />}
+              <span>Instagram orqali ulash (OAuth)</span>
+            </button>
+            <button
+              onClick={() => setTokenModalOpen(true)}
+              className="text-xs text-indigo-400 hover:text-indigo-300 bg-slate-900 border border-slate-800 hover:border-slate-700 py-2.5 px-3.5 rounded-xl font-medium transition"
+            >
+              Token orqali ulash
+            </button>
+          </div>
         )}
       </div>
 
@@ -1104,6 +1119,70 @@ export const UserVideoPage: React.FC = () => {
                       <UploadCloud size={14} />
                       <span>Yuklash</span>
                     </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Shaxsiy Token orqali ulash modali */}
+      {tokenModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2">
+                <Instagram size={20} className="text-pink-500" />
+                <h3 className="text-base font-semibold text-white">Instagram Token orqali ulash</h3>
+              </div>
+              <button
+                onClick={() => setTokenModalOpen(false)}
+                className="text-slate-400 hover:text-white text-lg font-bold leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+              Agar sizda Meta Graph API Explorer yoki Meta Business orqali olingan shaxsiy <strong>Instagram User Access Token</strong> bo'lsa, uni quyiga kiriting. Tizim uni avtomatik tekshirib, hisobingizni to'g'ridan-to'g'ri ulaydi.
+            </p>
+
+            <form onSubmit={handleConnectWithToken} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Instagram Access Token
+                </label>
+                <textarea
+                  rows={4}
+                  value={customTokenInput}
+                  onChange={(e) => setCustomTokenInput(e.target.value)}
+                  placeholder="IGAAY... yoki EAAB..."
+                  required
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-mono resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTokenModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white transition"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="submit"
+                  disabled={connectingToken || !customTokenInput.trim()}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                >
+                  {connectingToken ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Tekshirilmoqda...</span>
+                    </>
+                  ) : (
+                    <span>Tekshirish va Ulash</span>
                   )}
                 </button>
               </div>

@@ -110,6 +110,7 @@ urlpatterns = [
     path('link/<uuid:token>/', redirect_to_instagram, name='user_redirect'),
     path('my-post/<uuid:token>/', user_portal, name='user_portal'),
     path('oauth/callback/', instagram_callback, name='instagram_callback'),
+    path('oauth/callback', instagram_callback, name='instagram_callback_no_slash'),
     path('oauth/deauthorize/', instagram_deauthorize, name='instagram_deauthorize'),
     path('oauth/data-deletion/', instagram_data_deletion, name='instagram_data_deletion'),
     path('oauth/data-deletion/status/<str:confirmation_code>/', data_deletion_status, name='data_deletion_status'),

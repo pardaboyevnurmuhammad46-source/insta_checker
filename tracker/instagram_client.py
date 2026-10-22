@@ -138,16 +138,14 @@ class RealInstagramClient(InstagramClient):
 
     def build_auth_url(self, state: str) -> str:
         base_url = "https://www.instagram.com/oauth/authorize"
-        enable_fb = getattr(settings, 'INSTAGRAM_ENABLE_FB_LOGIN', '0')
-        force_auth = getattr(settings, 'INSTAGRAM_FORCE_AUTHENTICATION', '1')
+        redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', '').strip()
         params = {
-            'enable_fb_login': enable_fb,
-            'force_authentication': force_auth,
-            'client_id': settings.INSTAGRAM_APP_ID,
-            'redirect_uri': settings.INSTAGRAM_REDIRECT_URI,
+            'client_id': str(settings.INSTAGRAM_APP_ID).strip(),
+            'redirect_uri': redirect_uri,
             'response_type': 'code',
-            'scope': settings.INSTAGRAM_SCOPE,
+            'scope': getattr(settings, 'INSTAGRAM_SCOPE', 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments'),
             'state': str(state),
+            'force_reauth': 'true',
         }
         return f"{base_url}?{urllib.parse.urlencode(params)}"
 
