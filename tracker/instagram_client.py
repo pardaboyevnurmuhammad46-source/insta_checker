@@ -22,6 +22,7 @@ from .exceptions import (
     InstagramMetricsError,
     InstagramRateLimitError,
     InstagramMetricsNetworkError,
+    TokenInvalid,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,16 @@ class InstagramClient(ABC):
     @abstractmethod
     def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
         """Post statistikasi (views, likes, comments) ni oladi."""
+        pass
+
+    @abstractmethod
+    def list_recent_media(self, access_token: str, limit: int = 25) -> list[dict]:
+        """Oxirgi medialar ro'yxatini oladi (maksimum 4 sahifa)."""
+        pass
+
+    @abstractmethod
+    def get_media_insights(self, access_token: str, media_id: str) -> dict:
+        """Media statistikasi va tahlillarini oladi (views, reach, likes, comments, shares, saved)."""
         pass
 
 
@@ -467,6 +478,12 @@ class RealInstagramClient(InstagramClient):
             'views': int(views or 0),
         }
 
+    def list_recent_media(self, access_token: str, limit: int = 25) -> list[dict]:
+        return list_recent_media(token=access_token, limit=limit)
+
+    def get_media_insights(self, access_token: str, media_id: str) -> dict:
+        return get_media_insights(token=access_token, media_id=media_id)
+
 
 class DryRunInstagramClient(InstagramClient):
     """
@@ -608,6 +625,221 @@ class DryRunInstagramClient(InstagramClient):
             "likes": 25,
             "comments_count": 5,
         }
+
+    def list_recent_media(self, access_token: str, limit: int = 25) -> list[dict]:
+        r = get_redis_client()
+        if access_token:
+            tok_err = r.get(f"dry_run:sim:token:{access_token}:error")
+            if tok_err and str(tok_err) == "token_invalid":
+                record_instagram_error(InstagramErrorType.TOKEN_INVALID)
+                raise TokenInvalid("Token yaroqsiz (simulyatsiya)", error_code=190, error_subcode=463)
+        return []
+
+    def get_media_insights(self, access_token: str, media_id: str) -> dict:
+        r = get_redis_client()
+        if access_token:
+            tok_err = r.get(f"dry_run:sim:token:{access_token}:error")
+            if tok_err and str(tok_err) == "token_invalid":
+                record_instagram_error(InstagramErrorType.TOKEN_INVALID)
+                raise TokenInvalid("Token yaroqsiz (simulyatsiya)", error_code=190, error_subcode=463)
+        return {
+            'views': 250,
+            'reach': 200,
+            'likes': 25,
+            'comments': 5,
+            'comments_count': 5,
+            'shares': 3,
+            'saved': 2,
+            'raw': {'data': []},
+        }
+
+
+def _check_instagram_response(response: requests.Response, operation: str = "api_request") -> dict:
+    try:
+        data = response.json()
+    except Exception:
+        data = {}
+
+    if response.status_code != 200 or (isinstance(data, dict) and 'error' in data and not data.get('data')):
+        err_info = data.get('error', {}) if isinstance(data, dict) else {}
+        err_message = err_info.get('message') or response.text or f"HTTP {response.status_code} xatoligi"
+        err_code = err_info.get('code')
+        err_subcode = err_info.get('error_subcode')
+
+        try:
+            if err_code is not None:
+                err_code = int(err_code)
+        except (ValueError, TypeError):
+            pass
+
+        try:
+            if err_subcode is not None:
+                err_subcode = int(err_subcode)
+        except (ValueError, TypeError):
+            pass
+
+        if err_code == 190 or str(err_code) == '190' or response.status_code == 401:
+            record_instagram_error(InstagramErrorType.TOKEN_INVALID)
+            log_instagram_error(
+                InstagramErrorType.TOKEN_INVALID,
+                f"[{operation}] Instagram token yaroqsiz (code 190): {err_message}",
+                code=err_code,
+                subcode=err_subcode,
+            )
+            raise TokenInvalid(
+                message=f"Instagram access token yaroqsiz (code 190): {err_message}",
+                error_code=190,
+                error_subcode=err_subcode,
+                status_code=response.status_code,
+            )
+
+        error_type = classify_instagram_error(response=response)
+        record_instagram_error(error_type)
+        log_instagram_error(
+            error_type,
+            f"[{operation}] Instagram API xatosi: {err_message}",
+            code=err_code,
+            subcode=err_subcode,
+        )
+
+        if error_type == InstagramErrorType.RATE_LIMIT:
+            raise InstagramRateLimitError(
+                f"Instagram rate limit ({operation}): {err_message}",
+                status_code=response.status_code,
+                error_code=err_code,
+                error_subcode=err_subcode,
+            )
+        elif error_type == InstagramErrorType.SERVER_ERROR:
+            raise InstagramMetricsNetworkError(
+                f"Instagram server xatosi ({operation}): {err_message}",
+                error_type=error_type,
+                status_code=response.status_code,
+                error_code=err_code,
+                error_subcode=err_subcode,
+            )
+        else:
+            raise InstagramMetricsError(
+                f"Instagram API xatosi ({operation}, HTTP {response.status_code}): {err_message}",
+                error_type=error_type,
+                status_code=response.status_code,
+                error_code=err_code,
+                error_subcode=err_subcode,
+            )
+
+    return data
+
+
+def list_recent_media(token: str, limit: int = 25) -> list[dict]:
+    """
+    Foydalanuvchining so'nggi medialarini (Reels/postlar) oladi.
+    GET https://graph.instagram.com/me/media?fields=id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,thumbnail_url
+    paging.next bo'yicha maksimum 4 sahifagacha o'qiydi.
+    Xato kodi 190 bo'lsa TokenInvalid xatosi ko'tariladi.
+    """
+    if not token:
+        raise TokenInvalid("Access token kiritilmagan", error_code=190)
+
+    url = "https://graph.instagram.com/me/media"
+    params = {
+        'fields': 'id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,thumbnail_url',
+        'limit': int(limit),
+        'access_token': token,
+    }
+
+    all_media: list[dict] = []
+    current_url = url
+    current_params = params
+    max_pages = 4
+    pages_fetched = 0
+
+    while current_url and pages_fetched < max_pages:
+        try:
+            response = requests.get(
+                current_url,
+                params=current_params if pages_fetched == 0 else None,
+                timeout=15,
+            )
+        except requests.RequestException as exc:
+            record_instagram_error(InstagramErrorType.SERVER_ERROR)
+            log_instagram_error(InstagramErrorType.SERVER_ERROR, f"list_recent_media tarmoq xatosi: {exc}")
+            raise InstagramNetworkError(f"list_recent_media tarmoq xatosi: {exc}") from exc
+
+        data = _check_instagram_response(response, operation="list_recent_media")
+        items = data.get('data', [])
+        if isinstance(items, list):
+            all_media.extend(items)
+        pages_fetched += 1
+
+        paging = data.get('paging', {})
+        next_url = paging.get('next') if isinstance(paging, dict) else None
+        if not next_url:
+            break
+        current_url = next_url
+        current_params = None
+
+    return all_media
+
+
+def get_media_insights(token: str, media_id: str) -> dict:
+    """
+    Berilgan media uchun ko'rishlar, reach, likes, izohlar, shares va saved metrikalarini oladi.
+    GET https://graph.instagram.com/{media_id}/insights?metric=views,reach,likes,comments,shares,saved
+    Metrik nomlari rasmiy Meta hujjatiga mos. Xato kodi 190 bo'lsa TokenInvalid ko'tariladi.
+    """
+    if not token:
+        raise TokenInvalid("Access token kiritilmagan", error_code=190)
+    if not media_id:
+        raise ValueError("media_id kiritilishi shart")
+
+    url = f"https://graph.instagram.com/{media_id}/insights"
+    params = {
+        'metric': 'views,reach,likes,comments,shares,saved',
+        'access_token': token,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=15)
+    except requests.RequestException as exc:
+        record_instagram_error(InstagramErrorType.SERVER_ERROR)
+        log_instagram_error(InstagramErrorType.SERVER_ERROR, f"get_media_insights tarmoq xatosi: {exc}")
+        raise InstagramNetworkError(f"get_media_insights tarmoq xatosi: {exc}") from exc
+
+    data = _check_instagram_response(response, operation="get_media_insights")
+
+    metrics = {
+        'views': 0,
+        'reach': 0,
+        'likes': 0,
+        'comments': 0,
+        'comments_count': 0,
+        'shares': 0,
+        'saved': 0,
+    }
+
+    raw_items = data.get('data', [])
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            name = item.get('name')
+            val = 0
+            if 'values' in item and isinstance(item['values'], list) and len(item['values']) > 0:
+                val = item['values'][0].get('value', 0)
+            elif 'total_value' in item and isinstance(item['total_value'], dict):
+                val = item['total_value'].get('value', 0)
+            elif 'value' in item:
+                val = item.get('value', 0)
+
+            try:
+                val = int(val or 0)
+            except (ValueError, TypeError):
+                val = 0
+
+            if name:
+                metrics[name] = val
+                if name == 'comments':
+                    metrics['comments_count'] = val
+
+    metrics['raw'] = data
+    return metrics
 
 
 def get_instagram_client() -> InstagramClient:

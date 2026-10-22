@@ -1,10 +1,15 @@
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class LoginThrottle(AnonRateThrottle):
     scope = 'login'
+
+
+class UserSyncThrottle(UserRateThrottle):
+    scope = 'user_sync'
+    rate = '3/minute'
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

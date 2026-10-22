@@ -13,7 +13,7 @@ from django.db.models.functions import Coalesce, TruncDate
 from datetime import timedelta
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets, serializers
-from rest_framework.decorators import api_view, action, permission_classes
+from rest_framework.decorators import api_view, action, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
@@ -57,7 +57,9 @@ from .serializers import (
     AdminSummarySerializer,
     UserProfileOutputSerializer,
     UserPublishStatusOutputSerializer,
+    CampaignPostSerializer,
 )
+from .throttles import UserSyncThrottle
 from .services import (
     InstagramOAuthError,
     InstagramNetworkError,
@@ -76,7 +78,7 @@ from .services import (
     get_configured_milestones,
     update_post_metrics,
 )
-from .tasks import publish_reels_task, check_post_metrics_task
+from .tasks import publish_reels_task, check_post_metrics_task, sync_user_media_task
 from .instagram_errors import get_instagram_errors_last_hour
 
 logger = logging.getLogger(__name__)
@@ -1174,11 +1176,23 @@ def user_publish_status(request):
         "retries_left": 0,
         "has_post": False,
         "status": "none",
+        "code": None,
     }
 
     if not ig_user or ig_user.status != 'connected':
         base_response["can_publish_reason"] = "Instagram hisob ulanmagan."
         return Response(UserPublishStatusOutputSerializer(base_response).data)
+
+    user_link = UniqueLink.objects.filter(user=ig_user).order_by('-id').first()
+    if not user_link:
+        from .models import get_video_for_user
+        user_link = UniqueLink.objects.create(
+            user=ig_user,
+            video=get_video_for_user(ig_user),
+            status='pending',
+        )
+    user_code = user_link.code if user_link else None
+    base_response["code"] = user_code
 
     from .models import get_video_for_user
     chosen_video = get_video_for_user(ig_user)
@@ -1573,4 +1587,93 @@ def instagram_webhook(request):
         logger.error("Instagram Webhook event qayta ishlashda xatolik: %s", exc)
 
     return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_posts_list(request):
+    """
+    Foydalanuvchining o'z postlari ro'yxati (CampaignPostSerializer orqali).
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        paginator = StandardResultsSetPagination()
+        return paginator.get_paginated_response([])
+
+    qs = Post.objects.select_related('link__user', 'link__user__user').filter(link__user=ig_user).order_by('-id')
+
+    status_param = request.query_params.get('status')
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    source_param = request.query_params.get('source')
+    if source_param:
+        qs = qs.filter(source=source_param)
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    serializer = CampaignPostSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminRole])
+def admin_campaign_posts_list(request):
+    """
+    Admin: Barcha kampaniya postlari ro'yxati (CampaignPostSerializer orqali).
+    Filtrlar: status, source, username; sahifalash.
+    """
+    qs = Post.objects.select_related('link__user', 'link__user__user').all().order_by('-id')
+
+    status_param = request.query_params.get('status')
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    source_param = request.query_params.get('source')
+    if source_param:
+        qs = qs.filter(source=source_param)
+
+    username_param = request.query_params.get('username')
+    if username_param:
+        qs = qs.filter(
+            Q(link__user__user__username__icontains=username_param) |
+            Q(link__user__name__icontains=username_param)
+        )
+
+    search_param = request.query_params.get('search')
+    if search_param:
+        qs = qs.filter(
+            Q(link__user__user__username__icontains=search_param) |
+            Q(link__user__name__icontains=search_param) |
+            Q(link__code__icontains=search_param) |
+            Q(ig_media_id__icontains=search_param)
+        )
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    serializer = CampaignPostSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([UserSyncThrottle])
+def user_sync_media(request):
+    """
+    Foydalanuvchi Instagram Reels medialarini sinxronlashtirish uchun vazifani navbatga qo'yadi.
+    Darhol {"status": "queued"} qaytaradi.
+    Minutiga ko'pi bilan 3 marta chaqirish mumkin (throttle).
+    """
+    user = request.user
+    ig_user = getattr(user, 'instagram_user', None)
+    if not ig_user:
+        return Response(
+            {"error": "Instagram akkaunti ulanmagan"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    sync_user_media_task.delay(ig_user.id)
+    return Response({"status": "queued"}, status=status.HTTP_200_OK)
+
 

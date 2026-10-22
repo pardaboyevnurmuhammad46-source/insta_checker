@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import type { PublishStatus, VideoItem } from '../../types';
+import type { PublishStatus, VideoItem, CampaignPost, PaginatedResponse } from '../../types';
+import { formatNumber, formatDate, formatTimeAgo } from '../../utils/format';
 import {
   Film,
   Camera as Instagram,
@@ -17,6 +18,7 @@ import {
   UploadCloud,
   FileVideo,
   Info,
+  Copy,
 } from 'lucide-react';
 
 export const UserVideoPage: React.FC = () => {
@@ -39,9 +41,62 @@ export const UserVideoPage: React.FC = () => {
   const [videoTitle, setVideoTitle] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  // User's synced campaign posts
+  const [userPosts, setUserPosts] = useState<CampaignPost[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
   const pollIntervalRef = useRef<any>(null);
 
   const isConnected = user?.instagram_user?.status === 'connected';
+
+  const fetchUserPosts = async () => {
+    try {
+      setLoadingPosts(true);
+      const res = await apiClient.get<PaginatedResponse<CampaignPost>>('/api/user/posts/');
+      setUserPosts(res.data.results || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      await apiClient.post('/api/user/sync/');
+      showToast("Sinxronizatsiya so'rovi yuborildi. Instagram tekshirilmoqda...", 'info');
+
+      // 2 soniyalik polling
+      let count = 0;
+      const pollTimer = setInterval(async () => {
+        count += 1;
+        await Promise.all([fetchUserPosts(), fetchData()]);
+        if (count >= 4) {
+          clearInterval(pollTimer);
+          setSyncing(false);
+          showToast('Sinxronizatsiya yakunlandi', 'success');
+        }
+      }, 2000);
+    } catch (err: any) {
+      if (err.status === 429) {
+        showToast("Minutiga 3 martadan ko'p sinxronizatsiya qilib bo'lmaydi. Biroz kuting.", 'error');
+      } else {
+        showToast(err.detail || err.error || "Sinxronizatsiyada xatolik yuz berdi", 'error');
+      }
+      setSyncing(false);
+    }
+  };
+
+  const handleCopyCaption = (captionText: string) => {
+    if (!captionText) {
+      showToast('Kodingiz topilmadi', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(captionText);
+    showToast('Caption nusxalandi!', 'success');
+  };
 
   // Timer while publishing is running
   useEffect(() => {
@@ -82,6 +137,7 @@ export const UserVideoPage: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    fetchUserPosts();
   }, []);
 
   // Polling logic when status is queued or publishing (2 second rapid polling)
@@ -669,6 +725,227 @@ export const UserVideoPage: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* "O'zim joylayman" Bo'limi */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Instagram className="text-pink-400" size={20} />
+              O'zim joylayman
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Reels videoni o'zingiz Instagram ilovangiz orqali joylang. Tavsif (caption) ga quyidagi maxsus kodingizni kiriting.
+            </p>
+          </div>
+          {publishStatus?.code && (
+            <div className="flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-800">
+              <span className="text-xs text-slate-400">Sizning kodingiz:</span>
+              <span className="font-mono text-base font-bold text-amber-400 tracking-wider">
+                {publishStatus.code}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Tayyor tavsif va nusxalash */}
+          <div className="md:col-span-2 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-300">Tayyor Tavsif (Caption):</span>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopyCaption(
+                    publishStatus?.code
+                      ? `Men @brend saytida ishtirok etyapman! #brend ${publishStatus.code}`
+                      : ''
+                  )
+                }
+                disabled={!publishStatus?.code}
+                className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-50"
+              >
+                <Copy size={13} />
+                Nusxalash
+              </button>
+            </div>
+            <div className="p-3 bg-slate-900/90 rounded-lg border border-slate-800/80 text-xs font-mono text-slate-300 select-all">
+              {publishStatus?.code
+                ? `Men @brend saytida ishtirok etyapman! #brend ${publishStatus.code}`
+                : "Kod aniqlanmoqda..."}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              💡 Ushbu matnni nusxalab, Instagram'da Reels joylayotganda tavsif qismiga qo'ying. Tizim kodingiz orqali postni avtomatik topadi va statistikani hisoblaydi.
+            </p>
+          </div>
+
+          {/* Joyladim tugmasi */}
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <span className="text-xs font-semibold text-slate-300">Instagramda joyladingizmi?</span>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Video muvaffaqiyatli chiqqanidan so'ng ushbu tugmani bosing. Tizim darhol profilingizni tekshirib, postni tasdiqlaydi.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSync}
+              disabled={syncing || !isConnected}
+              className="w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition shadow-lg disabled:opacity-50"
+            >
+              {syncing ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Tekshirilmoqda...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={16} />
+                  <span>Joyladim</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* "Mening postlarim" Jadvali */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Film className="text-indigo-400" size={20} />
+              Mening postlarim
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Barcha tasdiqlangan va kuzatilayotgan Reels postlaringiz (/api/user/posts/)
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={fetchUserPosts}
+            disabled={loadingPosts}
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg transition"
+          >
+            <RefreshCw size={13} className={loadingPosts ? 'animate-spin' : ''} />
+            Yangilash
+          </button>
+        </div>
+
+        {loadingPosts && userPosts.length === 0 ? (
+          <div className="py-12 flex justify-center text-slate-400">
+            <Loader2 size={24} className="animate-spin text-indigo-400" />
+          </div>
+        ) : userPosts.length === 0 ? (
+          <div className="text-center py-10 bg-slate-950/40 rounded-xl border border-slate-800/60">
+            <Film size={36} className="mx-auto text-slate-600 mb-2" />
+            <p className="text-sm text-slate-400 font-medium">Hozircha hech qanday post mavjud emas</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Instagram ilovangizdan Reels joylang va kodingizni caption'ga yozib "Joyladim" tugmasini bosing.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950/80 text-slate-400 font-medium border-b border-slate-800 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th className="py-3 px-3">Video</th>
+                  <th className="py-3 px-3">Kod</th>
+                  <th className="py-3 px-3">Holat</th>
+                  <th className="py-3 px-3">Manba</th>
+                  <th className="py-3 px-3">Ko'rishlar</th>
+                  <th className="py-3 px-3">Layklar</th>
+                  <th className="py-3 px-3">Izohlar</th>
+                  <th className="py-3 px-3">Joylandi</th>
+                  <th className="py-3 px-3">Sinxronizatsiya</th>
+                  <th className="py-3 px-3 text-right">Havola</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-normal">
+                {userPosts.map((p) => (
+                  <tr key={p.id} className="hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-3">
+                      {p.thumbnail_url ? (
+                        <img
+                          src={p.thumbnail_url}
+                          alt="Thumbnail"
+                          className="w-10 h-14 object-cover rounded-md border border-slate-700"
+                        />
+                      ) : (
+                        <div className="w-10 h-14 bg-slate-800 rounded-md border border-slate-700 flex items-center justify-center">
+                          <Film size={16} className="text-slate-500" />
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 font-mono font-semibold text-amber-400">
+                      {p.code || '—'}
+                    </td>
+                    <td className="py-3 px-3">
+                      {p.status === 'verified' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                          Tasdiqlangan
+                        </span>
+                      ) : p.status === 'revoked' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-950 text-amber-400 border border-amber-800">
+                          Bekor qilingan
+                        </span>
+                      ) : p.status === 'rejected' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-950 text-rose-400 border border-rose-800">
+                          Rad etilgan
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-300">
+                          {p.status}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3">
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded ${
+                          p.source === 'site'
+                            ? 'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                            : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        {p.source === 'site' ? 'Sayt' : "O'zim"}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 font-semibold text-white">
+                      {formatNumber(p.views)}
+                    </td>
+                    <td className="py-3 px-3 text-slate-300">
+                      {formatNumber(p.likes)}
+                    </td>
+                    <td className="py-3 px-3 text-slate-300">
+                      {formatNumber(p.comments_count)}
+                    </td>
+                    <td className="py-3 px-3 text-slate-400 text-[11px]">
+                      {formatDate(p.posted_at)}
+                    </td>
+                    <td className="py-3 px-3 text-slate-400 text-[11px]">
+                      {p.last_synced_at ? `Yangilandi: ${formatTimeAgo(p.last_synced_at)}` : '—'}
+                    </td>
+                    <td className="py-3 px-3 text-right">
+                      {p.permalink ? (
+                        <a
+                          href={p.permalink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition"
+                        >
+                          Ochish <ExternalLink size={12} />
+                        </a>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Video Upload Modal */}

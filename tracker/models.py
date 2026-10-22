@@ -1,4 +1,5 @@
 import os
+import secrets
 import uuid
 from django.conf import settings
 from django.db import models
@@ -135,6 +136,14 @@ def get_video_for_user(user: InstagramUser | None = None) -> Video | None:
     return Video.objects.filter(is_default=True, is_active=True).first()
 
 
+UNIQUE_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def generate_unique_link_code(length: int = 6) -> str:
+    """0, O, 1, I belgilarisiz 6 belgidan iborat tasodifiy unikal kod yaratadi."""
+    return "".join(secrets.choice(UNIQUE_CODE_ALPHABET) for _ in range(length))
+
+
 class UniqueLink(models.Model):
     STATUS_CHOICES = (
         ('pending', 'Pending'),
@@ -145,6 +154,13 @@ class UniqueLink(models.Model):
 
     user = models.ForeignKey(InstagramUser, on_delete=models.CASCADE, related_name='links')
     token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    code = models.CharField(
+        max_length=6,
+        unique=True,
+        default=generate_unique_link_code,
+        db_index=True,
+        help_text="0/O/1/I belgilarisiz 6 xonali unikal kod",
+    )
     # video = models.FileField(upload_to='videos/')
     video = models.ForeignKey(
         Video,
@@ -173,12 +189,26 @@ class UniqueLink(models.Model):
                 kwargs['video'] = video_obj
         super().__init__(*args, **kwargs)
 
+    def save(self, *args, **kwargs):
+        if not self.code:
+            for _ in range(50):
+                candidate = generate_unique_link_code()
+                if not UniqueLink.objects.filter(code=candidate).exists():
+                    self.code = candidate
+                    break
+        else:
+            self.code = self.code.upper().strip()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.user.name} ({self.token})"
 
 
 class Post(models.Model):
     STATUS_CHOICES = (
+        ('verified', 'Verified'),
+        ('rejected', 'Rejected'),
+        ('revoked', 'Revoked'),
         ('queued', 'Queued'),
         ('publishing', 'Publishing'),
         ('published', 'Published'),
@@ -186,12 +216,20 @@ class Post(models.Model):
         ('failed', 'Failed'),
     )
 
+    SOURCE_CHOICES = (
+        ('site', 'Site'),
+        ('self', 'Self'),
+    )
+
     link = models.OneToOneField(UniqueLink, on_delete=models.CASCADE, related_name='post')
-    ig_media_id = models.CharField(max_length=100, null=True, blank=True)
+    source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default='site')
+    ig_media_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     permalink = models.URLField(max_length=500, null=True, blank=True)
+    thumbnail_url = models.URLField(max_length=1000, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='queued')
     posted_at = models.DateTimeField(null=True, blank=True)
     deleted_detected_at = models.DateTimeField(null=True, blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
     views = models.PositiveIntegerField(default=0)
     likes = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
@@ -206,6 +244,11 @@ class Post(models.Model):
             models.Index(fields=['status', 'next_check_at']),
             models.Index(fields=['link', 'posted_at']),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.ig_media_id == '':
+            self.ig_media_id = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Post: {self.link.user.name} ({self.status})"

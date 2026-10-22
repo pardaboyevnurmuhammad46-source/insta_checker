@@ -24,3 +24,22 @@ export function formatDate(dateStr: string | null | undefined): string {
     return dateStr;
   }
 }
+
+export function formatTimeAgo(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffSec = Math.max(0, Math.floor(diffMs / 1000));
+    if (diffSec < 60) return 'hozirgina';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin} daqiqa oldin`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours} soat oldin`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} kun oldin`;
+  } catch {
+    return dateStr;
+  }
+}

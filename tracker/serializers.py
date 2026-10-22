@@ -153,6 +153,36 @@ class AdminPostSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class CampaignPostSerializer(serializers.ModelSerializer):
+    username = serializers.SerializerMethodField()
+    code = serializers.CharField(source='link.code', read_only=True, default='')
+
+    class Meta:
+        model = Post
+        fields = [
+            'id',
+            'thumbnail_url',
+            'permalink',
+            'status',
+            'source',
+            'views',
+            'likes',
+            'comments_count',
+            'posted_at',
+            'last_synced_at',
+            'username',
+            'code',
+        ]
+        read_only_fields = fields
+
+    def get_username(self, obj):
+        if obj.link and obj.link.user:
+            if obj.link.user.user and obj.link.user.user.username:
+                return obj.link.user.user.username
+            return obj.link.user.name or ''
+        return ''
+
+
 class PostStatSerializer(serializers.ModelSerializer):
     class Meta:
         model = PostStat
@@ -229,6 +259,7 @@ class UserPublishStatusOutputSerializer(serializers.Serializer):
     retries_left = serializers.IntegerField(default=0)
     can_publish = serializers.BooleanField(default=False)
     can_publish_reason = serializers.CharField(allow_null=True, required=False)
+    code = serializers.CharField(allow_null=True, required=False)
     upload_limits = serializers.DictField(required=False)
 
 class UserProfileOutputSerializer(serializers.Serializer):

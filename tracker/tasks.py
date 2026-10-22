@@ -3,7 +3,7 @@ import math
 from datetime import timedelta
 from celery import shared_task
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from .models import Post, InstagramUser
 from .rate_limiter import rate_limiter
@@ -12,10 +12,12 @@ from .services import (
     publish_reels_for_link,
     update_post_metrics,
     refresh_user_token,
+    sync_user_media,
     InstagramPublishError,
     InstagramMetricsError,
     InstagramRateLimitError,
     InstagramNetworkError,
+    TokenInvalid,
 )
 from .video_utils import process_video_file
 
@@ -207,4 +209,103 @@ def process_video_task(self, video_id: int):
         video.processing_error = f"Kutilmagan xatolik: {exc}"
         video.save(update_fields=['status', 'processing_error'])
         return {"status": "failed", "error": str(exc)}
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def sync_user_media_task(self, user_id: int):
+    """
+    Foydalanuvchi Instagram medialarini (Reels) sinxronizatsiya qiluvchi Celery vazifasi.
+    Xatolik bo'lsa 30 soniya oraliq bilan ko'pi bilan 3 marta qayta urinadi.
+    """
+    logger.info("Foydalanuvchi medialarini sinxronizatsiya qilish boshlandi: user_id=%s", user_id)
+    try:
+        user = InstagramUser.objects.get(id=user_id)
+    except InstagramUser.DoesNotExist:
+        logger.warning("InstagramUser topilmadi: user_id=%s", user_id)
+        return {"error": f"InstagramUser #{user_id} topilmadi"}
+
+    if not user.access_token or user.status == 'needs_reauth':
+        logger.info("Foydalanuvchi tokeni mavjud emas yoki 'needs_reauth': user_id=%s", user_id)
+        return {"status": "skipped", "reason": "no_token_or_needs_reauth"}
+
+    try:
+        result = sync_user_media(user)
+        logger.info("Foydalanuvchi medialari sinxronizatsiya qilindi: user_id=%s, natija=%s", user_id, result)
+        return result
+    except InstagramNetworkError as exc:
+        logger.warning("sync_user_media_task tarmoq xatosi (user_id=%s): %s", user_id, mask_sensitive_data(str(exc)))
+        raise self.retry(exc=exc, countdown=30)
+    except TokenInvalid as exc:
+        logger.warning("sync_user_media_task da token yaroqsiz (user_id=%s): %s", user_id, exc)
+        user.status = 'needs_reauth'
+        user.save(update_fields=['status'])
+        return {"status": "needs_reauth", "error": str(exc)}
+    except Exception as exc:
+        logger.exception("Kutilmagan xatolik sync_user_media_task da (user_id=%s): %s", user_id, mask_sensitive_data(str(exc)))
+        raise self.retry(exc=exc, countdown=30)
+
+
+@shared_task
+def sync_recent_active_users_task():
+    """
+    Har 10 daqiqada ishga tushadi:
+    Oxirgi 48 soat ichida posti bor (joylangan, sinxronlangan yoki yaratilgan) ulangan foydalanuvchilar
+    uchun sync_user_media_task vazifalarini ishga tushiradi.
+    """
+    threshold = timezone.now() - timedelta(hours=48)
+    user_ids = list(
+        InstagramUser.objects.filter(
+            status='connected',
+            links__post__isnull=False,
+        ).filter(
+            models.Q(links__post__posted_at__gte=threshold) |
+            models.Q(links__post__last_synced_at__gte=threshold) |
+            models.Q(links__created_at__gte=threshold)
+        ).exclude(access_token__isnull=True).exclude(access_token='')
+        .values_list('id', flat=True)
+        .distinct()
+    )
+
+    for uid in user_ids:
+        sync_user_media_task.delay(uid)
+
+    logger.info("Oxirgi 48 soatdagi postli foydalanuvchilar sinxronizatsiyaga yuborildi: count=%d", len(user_ids))
+    return len(user_ids)
+
+
+@shared_task
+def sync_other_users_task():
+    """
+    Har soatda ishga tushadi:
+    Oxirgi 48 soatda faol bo'lmagan qolgan barcha ulangan foydalanuvchilar
+    uchun sync_user_media_task vazifalarini ishga tushiradi.
+    """
+    threshold = timezone.now() - timedelta(hours=48)
+    recent_user_ids = set(
+        InstagramUser.objects.filter(
+            status='connected',
+            links__post__isnull=False,
+        ).filter(
+            models.Q(links__post__posted_at__gte=threshold) |
+            models.Q(links__post__last_synced_at__gte=threshold) |
+            models.Q(links__created_at__gte=threshold)
+        ).exclude(access_token__isnull=True).exclude(access_token='')
+        .values_list('id', flat=True)
+    )
+
+    other_user_ids = list(
+        InstagramUser.objects.filter(status='connected')
+        .exclude(access_token__isnull=True)
+        .exclude(access_token='')
+        .exclude(id__in=recent_user_ids)
+        .values_list('id', flat=True)
+        .distinct()
+    )
+
+    for uid in other_user_ids:
+        sync_user_media_task.delay(uid)
+
+    logger.info("Qolgan foydalanuvchilar sinxronizatsiyaga yuborildi: count=%d", len(other_user_ids))
+    return len(other_user_ids)
+
 

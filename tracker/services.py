@@ -31,9 +31,14 @@ from .exceptions import (
     InstagramMetricsError,
     InstagramRateLimitError,
     InstagramMetricsNetworkError,
+    TokenInvalid,
     MetaWebhookError,
 )
-from .instagram_client import get_instagram_client
+from .instagram_client import (
+    get_instagram_client,
+    list_recent_media,
+    get_media_insights,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -719,3 +724,170 @@ def handle_data_deletion_request(user_id: str) -> tuple[str, str]:
     status_url = f"{site_url}/oauth/data-deletion/status/{confirmation_code}/"
     logger.info("Data deletion yakunlandi: ig_user_id=%s, code=%s", user_id, confirmation_code)
     return status_url, confirmation_code
+
+
+def sync_user_media(instagram_user: InstagramUser) -> dict:
+    """
+    Instagram Graph API orqali foydalanuvchining so'nggi Reels postlarini tekshiradi va bazani yangilaydi:
+    1. list_recent_media chaqiriladi.
+    2. REELS bo'lgan va caption ichida foydalanuvchining biror UniqueLink.code kodi bor medialar uchun
+       Post (status='verified', source='self') yaratiladi yoki yangilanadi.
+       Agar mavjud post source='site' bo'lsa, source o'zgartirilmaydi.
+    3. Agar ig_media_id boshqa foydalanuvchining postiga tegishli bo'lsa, o'tkazib yuboriladi va log yoziladi.
+    4. Har bir verified post uchun get_media_insights chaqirilib, views va last_synced_at yangilanadi.
+    5. Bazadagi verified postlardan Instagram ro'yxatida yo'qlari yoki kodi o'chirilganlari 'revoked' qilinadi.
+    6. TokenInvalid xatosi yuz berganda InstagramUser.status = 'needs_reauth' qilinadi va sync to'xtatiladi.
+    """
+    if not instagram_user.access_token or instagram_user.status == 'needs_reauth':
+        logger.warning("Foydalanuvchi tokeni mavjud emas yoki 'needs_reauth' holatida: user_id=%s", instagram_user.id)
+        return {'status': 'skipped', 'reason': 'no_token_or_needs_reauth'}
+
+    token = instagram_user.access_token
+
+    try:
+        media_list = list_recent_media(token=token, limit=25)
+    except TokenInvalid as exc:
+        logger.warning("Foydalanuvchi tokeni yaroqsiz (user_id=%s): %s", instagram_user.id, exc)
+        instagram_user.status = 'needs_reauth'
+        instagram_user.save(update_fields=['status'])
+        return {'status': 'needs_reauth', 'error': str(exc)}
+
+    # Foydalanuvchining barcha unikal linklari va kodlari
+    user_links = list(instagram_user.links.all())
+    code_to_link = {}
+    for lk in user_links:
+        if lk.code:
+            code_to_link[lk.code.upper().strip()] = lk
+
+    verified_media_ids = set()
+    verified_posts = []
+
+    # 1. Instagramdan olingan medialarni tekshirish
+    for media in media_list:
+        media_id = str(media.get('id') or '')
+        if not media_id:
+            continue
+
+        product_type = str(media.get('media_product_type') or '').upper()
+        if product_type != 'REELS':
+            continue
+
+        caption = str(media.get('caption') or '').upper()
+        matching_link = None
+        for code, lk in code_to_link.items():
+            if code in caption:
+                matching_link = lk
+                break
+
+        if not matching_link:
+            continue
+
+        # 2. ig_media_id boshqa foydalanuvchining postida bo'lsa, o'tkazib yuborish va log yozish
+        existing_other = Post.objects.filter(ig_media_id=media_id).exclude(link__user=instagram_user).select_related('link__user').first()
+        if existing_other:
+            logger.warning(
+                "ig_media_id=%s boshqa foydalanuvchiga tegishli (user_id=%s). Joriy user_id=%s uchun o'tkazib yuborildi.",
+                media_id, existing_other.link.user_id, instagram_user.id
+            )
+            continue
+
+        # Postni topish yoki yaratish
+        existing_post = Post.objects.filter(ig_media_id=media_id).first()
+        now = timezone.now()
+
+        if existing_post:
+            post = existing_post
+            post.status = 'verified'
+            if post.source != 'site':
+                post.source = 'self'
+            if media.get('permalink'):
+                post.permalink = media['permalink']
+            if media.get('thumbnail_url'):
+                post.thumbnail_url = media['thumbnail_url']
+            post.likes = int(media.get('like_count') or 0)
+            post.comments_count = int(media.get('comments_count') or 0)
+            post.last_synced_at = now
+            post.save(update_fields=[
+                'status', 'source', 'permalink', 'thumbnail_url',
+                'likes', 'comments_count', 'last_synced_at'
+            ])
+        else:
+            if hasattr(matching_link, 'post') and (not matching_link.post.ig_media_id):
+                post = matching_link.post
+                post.ig_media_id = media_id
+                post.status = 'verified'
+                if post.source != 'site':
+                    post.source = 'self'
+                post.permalink = media.get('permalink')
+                post.thumbnail_url = media.get('thumbnail_url')
+                post.likes = int(media.get('like_count') or 0)
+                post.comments_count = int(media.get('comments_count') or 0)
+                post.last_synced_at = now
+                post.save()
+            else:
+                target_link = matching_link
+                if hasattr(target_link, 'post'):
+                    target_link = UniqueLink.objects.create(
+                        user=instagram_user,
+                        video=matching_link.video,
+                        status='posted',
+                    )
+                post = Post.objects.create(
+                    link=target_link,
+                    ig_media_id=media_id,
+                    status='verified',
+                    source='self',
+                    permalink=media.get('permalink'),
+                    thumbnail_url=media.get('thumbnail_url'),
+                    likes=int(media.get('like_count') or 0),
+                    comments_count=int(media.get('comments_count') or 0),
+                    last_synced_at=now,
+                )
+
+        verified_media_ids.add(media_id)
+        verified_posts.append(post)
+
+    # 3. Har bir verified post uchun get_media_insights chaqirilib, views va last_synced_at yangilanadi
+    for post in verified_posts:
+        try:
+            insights = get_media_insights(token=token, media_id=post.ig_media_id)
+            views = int(insights.get('views') or 0)
+            post.views = views
+            post.last_synced_at = timezone.now()
+            post.save(update_fields=['views', 'last_synced_at'])
+
+            PostStat.objects.create(
+                post=post,
+                views=post.views,
+                likes=post.likes,
+                comments_count=post.comments_count,
+            )
+            check_and_award_prizes(post)
+        except TokenInvalid as exc:
+            logger.warning("get_media_insights token yaroqsiz (user_id=%s): %s", instagram_user.id, exc)
+            instagram_user.status = 'needs_reauth'
+            instagram_user.save(update_fields=['status'])
+            return {'status': 'needs_reauth', 'error': str(exc)}
+        except Exception as exc:
+            logger.warning("get_media_insights da xatolik (post_id=%s): %s", post.id, exc)
+
+    # 4. Bazadagi verified postlardan Instagram ro'yxatida yo'qlari yoki kodi qolmaganlari -> revoked
+    user_verified_posts = Post.objects.filter(
+        link__user=instagram_user,
+        status='verified',
+    )
+    revoked_count = 0
+    now = timezone.now()
+    for p in user_verified_posts:
+        if p.ig_media_id not in verified_media_ids:
+            p.status = 'revoked'
+            p.last_synced_at = now
+            p.save(update_fields=['status', 'last_synced_at'])
+            revoked_count += 1
+            logger.info("Post revoked qilindi: post_id=%s, ig_media_id=%s", p.id, p.ig_media_id)
+
+    return {
+        'status': 'success',
+        'verified_count': len(verified_posts),
+        'revoked_count': revoked_count,
+    }

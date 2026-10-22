@@ -3134,6 +3134,688 @@ class VideoAspectConversionTestCase(TestCase):
         self.assertIn("tayyorlanmoqda", data['can_publish_reason'])
 
 
+class ModelAndClientPromptOneTestCase(TestCase):
+    def setUp(self):
+        self.user = InstagramUser.objects.create(name="Prompt1 User")
+        dummy = SimpleUploadedFile("test.mp4", b"content", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.user, video=dummy)
+
+    def test_uniquelink_code_auto_generated(self):
+        from tracker.models import UNIQUE_CODE_ALPHABET
+        self.assertTrue(bool(self.link.code))
+        self.assertEqual(len(self.link.code), 6)
+        # 0, O, 1, I belgilarisiz bo'lishi kerak
+        for bad_char in ('0', 'O', '1', 'I', 'o', 'i'):
+            self.assertNotIn(bad_char, self.link.code)
+        for char in self.link.code:
+            self.assertIn(char, UNIQUE_CODE_ALPHABET)
+
+    def test_uniquelink_code_uniqueness(self):
+        dummy = SimpleUploadedFile("test2.mp4", b"content", content_type="video/mp4")
+        link2 = UniqueLink(user=self.user, video=dummy, code=self.link.code)
+        with self.assertRaises(IntegrityError):
+            link2.save()
+
+    def test_uniquelink_code_uppercase_normalization(self):
+        dummy = SimpleUploadedFile("test3.mp4", b"content", content_type="video/mp4")
+        link = UniqueLink.objects.create(user=self.user, video=dummy, code="abc234")
+        self.assertEqual(link.code, "ABC234")
+
+    def test_post_model_fields_and_choices(self):
+        post = Post.objects.create(
+            link=self.link,
+            source='self',
+            status='verified',
+            thumbnail_url='https://example.com/thumb.jpg',
+            last_synced_at=timezone.now(),
+            views=100,
+            likes=10,
+            comments_count=2,
+        )
+        self.assertEqual(post.source, 'self')
+        self.assertEqual(post.status, 'verified')
+        self.assertEqual(post.thumbnail_url, 'https://example.com/thumb.jpg')
+        self.assertEqual(post.views, 100)
+        self.assertEqual(post.likes, 10)
+        self.assertEqual(post.comments_count, 2)
+        self.assertIsNotNone(post.last_synced_at)
+
+        # status choices: rejected, revoked
+        post.status = 'rejected'
+        post.save()
+        post.refresh_from_db()
+        self.assertEqual(post.status, 'rejected')
+
+        post.status = 'revoked'
+        post.save()
+        post.refresh_from_db()
+        self.assertEqual(post.status, 'revoked')
+
+    def test_post_ig_media_id_uniqueness(self):
+        dummy = SimpleUploadedFile("test4.mp4", b"content", content_type="video/mp4")
+        link2 = UniqueLink.objects.create(user=self.user, video=dummy)
+
+        post1 = Post.objects.create(link=self.link, ig_media_id="ig_media_unique_1")
+        post2 = Post(link=link2, ig_media_id="ig_media_unique_1")
+        with self.assertRaises(IntegrityError):
+            post2.save()
+
+    def test_post_ig_media_id_null_and_empty_handling(self):
+        dummy1 = SimpleUploadedFile("test5.mp4", b"content", content_type="video/mp4")
+        dummy2 = SimpleUploadedFile("test6.mp4", b"content", content_type="video/mp4")
+        link1 = UniqueLink.objects.create(user=self.user, video=dummy1)
+        link2 = UniqueLink.objects.create(user=self.user, video=dummy2)
+
+        # Multiple posts with ig_media_id=None
+        p1 = Post.objects.create(link=link1, ig_media_id=None)
+        p2 = Post.objects.create(link=link2, ig_media_id="")
+        self.assertIsNone(p1.ig_media_id)
+        self.assertIsNone(p2.ig_media_id)
+
+    @patch('tracker.instagram_client.requests.get')
+    def test_list_recent_media_single_page(self, mock_get):
+        from tracker.instagram_client import list_recent_media
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            'data': [
+                {
+                    'id': 'media_101',
+                    'caption': 'Reel caption with code #ABCDEF',
+                    'media_type': 'VIDEO',
+                    'media_product_type': 'REELS',
+                    'permalink': 'https://instagram.com/reel/101/',
+                    'timestamp': '2026-10-22T10:00:00+0000',
+                    'like_count': 15,
+                    'comments_count': 3,
+                    'thumbnail_url': 'https://example.com/101.jpg',
+                }
+            ],
+            'paging': {}
+        }
+        mock_get.return_value = mock_resp
+
+        media_list = list_recent_media(token="test_token_123", limit=10)
+        self.assertEqual(len(media_list), 1)
+        self.assertEqual(media_list[0]['id'], 'media_101')
+        self.assertEqual(media_list[0]['media_product_type'], 'REELS')
+
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        self.assertEqual(args[0], 'https://graph.instagram.com/me/media')
+        self.assertEqual(kwargs['params']['limit'], 10)
+        self.assertEqual(kwargs['params']['access_token'], 'test_token_123')
+        self.assertIn('media_product_type', kwargs['params']['fields'])
+
+    @patch('tracker.instagram_client.requests.get')
+    def test_list_recent_media_pagination_stops_at_max_4_pages(self, mock_get):
+        from tracker.instagram_client import list_recent_media
+
+        # 6 sahifali soxta javoblar (maksimal 4 tasi olinishi kerak)
+        def side_effect(url, params=None, timeout=15):
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            page_num = 1
+            if 'page=' in url:
+                page_num = int(url.split('page=')[1])
+            mock_resp.json.return_value = {
+                'data': [{'id': f'media_p{page_num}'}],
+                'paging': {'next': f'https://graph.instagram.com/me/media?page={page_num + 1}'}
+            }
+            return mock_resp
+
+        mock_get.side_effect = side_effect
+
+        media_list = list_recent_media(token="test_token_paging")
+        self.assertEqual(len(media_list), 4)
+        self.assertEqual([m['id'] for m in media_list], ['media_p1', 'media_p2', 'media_p3', 'media_p4'])
+        self.assertEqual(mock_get.call_count, 4)
+
+    @patch('tracker.instagram_client.requests.get')
+    def test_list_recent_media_token_invalid_code_190(self, mock_get):
+        from tracker.instagram_client import list_recent_media, TokenInvalid
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = json.dumps({
+            "error": {
+                "message": "Error validating access token: Session has expired",
+                "type": "OAuthException",
+                "code": 190,
+                "error_subcode": 463
+            }
+        })
+        mock_resp.json.return_value = {
+            "error": {
+                "message": "Error validating access token: Session has expired",
+                "type": "OAuthException",
+                "code": 190,
+                "error_subcode": 463
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        with self.assertRaises(TokenInvalid) as ctx:
+            list_recent_media(token="expired_token")
+
+        self.assertEqual(ctx.exception.error_code, 190)
+        self.assertEqual(ctx.exception.error_subcode, 463)
+
+    @patch('tracker.instagram_client.requests.get')
+    def test_get_media_insights_success(self, mock_get):
+        from tracker.instagram_client import get_media_insights
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            'data': [
+                {'name': 'views', 'values': [{'value': 1250}]},
+                {'name': 'reach', 'values': [{'value': 980}]},
+                {'name': 'likes', 'values': [{'value': 110}]},
+                {'name': 'comments', 'values': [{'value': 18}]},
+                {'name': 'shares', 'values': [{'value': 9}]},
+                {'name': 'saved', 'values': [{'value': 5}]},
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        insights = get_media_insights(token="test_token", media_id="media_reel_999")
+        self.assertEqual(insights['views'], 1250)
+        self.assertEqual(insights['reach'], 980)
+        self.assertEqual(insights['likes'], 110)
+        self.assertEqual(insights['comments'], 18)
+        self.assertEqual(insights['comments_count'], 18)
+        self.assertEqual(insights['shares'], 9)
+        self.assertEqual(insights['saved'], 5)
+
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        self.assertEqual(args[0], 'https://graph.instagram.com/media_reel_999/insights')
+        self.assertEqual(kwargs['params']['metric'], 'views,reach,likes,comments,shares,saved')
+        self.assertEqual(kwargs['params']['access_token'], 'test_token')
+
+    @patch('tracker.instagram_client.requests.get')
+    def test_get_media_insights_token_invalid_code_190(self, mock_get):
+        from tracker.instagram_client import get_media_insights, TokenInvalid
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = json.dumps({
+            "error": {
+                "message": "Invalid OAuth access token.",
+                "code": 190
+            }
+        })
+        mock_resp.json.return_value = {
+            "error": {
+                "message": "Invalid OAuth access token.",
+                "code": 190
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        with self.assertRaises(TokenInvalid) as ctx:
+            get_media_insights(token="bad_token", media_id="media_123")
+
+        self.assertEqual(ctx.exception.error_code, 190)
+
+    def test_client_class_delegation(self):
+        from tracker.instagram_client import RealInstagramClient, DryRunInstagramClient
+
+        real_client = RealInstagramClient()
+        self.assertTrue(hasattr(real_client, 'list_recent_media'))
+        self.assertTrue(hasattr(real_client, 'get_media_insights'))
+
+        dry_client = DryRunInstagramClient()
+        self.assertEqual(dry_client.list_recent_media(access_token="tok"), [])
+        ins = dry_client.get_media_insights(access_token="tok", media_id="med")
+        self.assertIn('views', ins)
+        self.assertIn('likes', ins)
+        self.assertIn('comments', ins)
+        self.assertIn('reach', ins)
+        self.assertIn('shares', ins)
+        self.assertIn('saved', ins)
+
+
+class SyncUserMediaAndCeleryTasksTestCase(TestCase):
+    def setUp(self):
+        self.user_a = InstagramUser.objects.create(name="User A", status="connected", access_token="token_a")
+        self.user_b = InstagramUser.objects.create(name="User B", status="connected", access_token="token_b")
+
+        dummy_vid = SimpleUploadedFile("v1.mp4", b"data", content_type="video/mp4")
+        self.link_a = UniqueLink.objects.create(user=self.user_a, video=dummy_vid, code="AAA234")
+        self.link_b = UniqueLink.objects.create(user=self.user_b, video=dummy_vid, code="BBB567")
+
+    @patch('tracker.services.get_media_insights')
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_with_code_success(self, mock_list, mock_insights):
+        from tracker.services import sync_user_media
+
+        mock_list.return_value = [
+            {
+                'id': 'media_reels_100',
+                'caption': 'Check out this awesome video with code #AAA234 for promo!',
+                'media_product_type': 'REELS',
+                'permalink': 'https://instagram.com/reel/100/',
+                'thumbnail_url': 'https://example.com/thumb_100.jpg',
+                'like_count': 50,
+                'comments_count': 8,
+            }
+        ]
+        mock_insights.return_value = {
+            'views': 2500,
+            'reach': 1800,
+            'likes': 50,
+            'comments': 8,
+            'comments_count': 8,
+            'shares': 10,
+            'saved': 4,
+        }
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(res['verified_count'], 1)
+
+        post = Post.objects.get(ig_media_id='media_reels_100')
+        self.assertEqual(post.status, 'verified')
+        self.assertEqual(post.source, 'self')
+        self.assertEqual(post.permalink, 'https://instagram.com/reel/100/')
+        self.assertEqual(post.thumbnail_url, 'https://example.com/thumb_100.jpg')
+        self.assertEqual(post.likes, 50)
+        self.assertEqual(post.comments_count, 8)
+        self.assertEqual(post.views, 2500)
+        self.assertIsNotNone(post.last_synced_at)
+        self.assertEqual(post.link.user, self.user_a)
+
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_without_code(self, mock_list):
+        from tracker.services import sync_user_media
+
+        mock_list.return_value = [
+            {
+                'id': 'media_no_code_200',
+                'caption': 'Just a normal reel without any promo code here',
+                'media_product_type': 'REELS',
+                'permalink': 'https://instagram.com/reel/200/',
+                'thumbnail_url': 'https://example.com/thumb_200.jpg',
+                'like_count': 12,
+                'comments_count': 1,
+            }
+        ]
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(res['verified_count'], 0)
+        self.assertFalse(Post.objects.filter(ig_media_id='media_no_code_200').exists())
+
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_not_reels(self, mock_list):
+        from tracker.services import sync_user_media
+
+        mock_list.return_value = [
+            {
+                'id': 'media_feed_300',
+                'caption': 'Post with code AAA234 but this is a feed post',
+                'media_product_type': 'FEED',
+                'permalink': 'https://instagram.com/p/300/',
+                'thumbnail_url': 'https://example.com/thumb_300.jpg',
+                'like_count': 20,
+                'comments_count': 2,
+            }
+        ]
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(res['verified_count'], 0)
+        self.assertFalse(Post.objects.filter(ig_media_id='media_feed_300').exists())
+
+    @patch('tracker.services.get_media_insights')
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_duplicate_ig_media_id_other_user(self, mock_list, mock_insights):
+        from tracker.services import sync_user_media
+
+        # Post allaqachon User A ga tegishli
+        Post.objects.create(
+            link=self.link_a,
+            ig_media_id='media_shared_400',
+            status='verified',
+            source='self',
+        )
+
+        # User B ning Instagramidan ham aynan shu id qaytyapti va caption'da User B ning kodi bor
+        mock_list.return_value = [
+            {
+                'id': 'media_shared_400',
+                'caption': 'Reel with BBB567 code!',
+                'media_product_type': 'REELS',
+                'permalink': 'https://instagram.com/reel/400/',
+                'like_count': 5,
+                'comments_count': 0,
+            }
+        ]
+
+        with self.assertLogs('tracker.services', level='WARNING') as cm:
+            res = sync_user_media(self.user_b)
+
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(res['verified_count'], 0)
+        # Post hali ham User A ga tegishli bo'lib qoladi
+        post = Post.objects.get(ig_media_id='media_shared_400')
+        self.assertEqual(post.link.user, self.user_a)
+        self.assertTrue(any("boshqa foydalanuvchiga tegishli" in msg for msg in cm.output))
+
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_token_invalid_list_media(self, mock_list):
+        from tracker.services import sync_user_media
+        from tracker.instagram_client import TokenInvalid
+
+        mock_list.side_effect = TokenInvalid("Session expired (code 190)", error_code=190)
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'needs_reauth')
+        self.user_a.refresh_from_db()
+        self.assertEqual(self.user_a.status, 'needs_reauth')
+
+    @patch('tracker.services.get_media_insights')
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_token_invalid_insights(self, mock_list, mock_insights):
+        from tracker.services import sync_user_media
+        from tracker.instagram_client import TokenInvalid
+
+        mock_list.return_value = [
+            {
+                'id': 'media_token_err_500',
+                'caption': 'Caption with AAA234',
+                'media_product_type': 'REELS',
+            }
+        ]
+        mock_insights.side_effect = TokenInvalid("Token revoked during insights", error_code=190)
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'needs_reauth')
+        self.user_a.refresh_from_db()
+        self.assertEqual(self.user_a.status, 'needs_reauth')
+
+    @patch('tracker.services.get_media_insights')
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_code_removed_marks_revoked(self, mock_list, mock_insights):
+        from tracker.services import sync_user_media
+
+        # Avval verified bo'lgan post
+        post = Post.objects.create(
+            link=self.link_a,
+            ig_media_id='media_revoked_600',
+            status='verified',
+            source='self',
+        )
+
+        # Foydalanuvchi caption'dan kodni o'chirib tashladi
+        mock_list.return_value = [
+            {
+                'id': 'media_revoked_600',
+                'caption': 'Caption without code anymore!',
+                'media_product_type': 'REELS',
+            }
+        ]
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(res['revoked_count'], 1)
+
+        post.refresh_from_db()
+        self.assertEqual(post.status, 'revoked')
+        self.assertIsNotNone(post.last_synced_at)
+
+    @patch('tracker.services.get_media_insights')
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_deleted_from_instagram_marks_revoked(self, mock_list, mock_insights):
+        from tracker.services import sync_user_media
+
+        # Avval verified bo'lgan post
+        post = Post.objects.create(
+            link=self.link_a,
+            ig_media_id='media_deleted_700',
+            status='verified',
+            source='self',
+        )
+
+        # Instagramda post umuman yo'q (ro'yxat bo'sh)
+        mock_list.return_value = []
+
+        res = sync_user_media(self.user_a)
+        self.assertEqual(res['status'], 'success')
+        self.assertEqual(res['revoked_count'], 1)
+
+        post.refresh_from_db()
+        self.assertEqual(post.status, 'revoked')
+
+    @patch('tracker.services.get_media_insights')
+    @patch('tracker.services.list_recent_media')
+    def test_sync_user_media_preserves_site_source(self, mock_list, mock_insights):
+        from tracker.services import sync_user_media
+
+        # Saytdan chiqarilgan post (source='site')
+        post = Post.objects.create(
+            link=self.link_a,
+            ig_media_id='media_site_800',
+            status='verified',
+            source='site',
+        )
+
+        mock_list.return_value = [
+            {
+                'id': 'media_site_800',
+                'caption': 'Caption with AAA234',
+                'media_product_type': 'REELS',
+                'like_count': 100,
+                'comments_count': 10,
+            }
+        ]
+        mock_insights.return_value = {'views': 5000}
+
+        sync_user_media(self.user_a)
+
+        post.refresh_from_db()
+        self.assertEqual(post.source, 'site')
+        self.assertEqual(post.status, 'verified')
+        self.assertEqual(post.views, 5000)
+
+    @patch('tracker.tasks.sync_user_media')
+    def test_sync_user_media_task_retry_on_network_error(self, mock_sync):
+        from tracker.tasks import sync_user_media_task
+        from tracker.exceptions import InstagramNetworkError
+
+        mock_sync.side_effect = InstagramNetworkError("Instagram network timeout")
+
+        with patch.object(sync_user_media_task, 'retry', side_effect=Exception("TaskRetried")) as mock_retry:
+            with self.assertRaises(Exception) as ctx:
+                sync_user_media_task(self.user_a.id)
+            self.assertEqual(str(ctx.exception), "TaskRetried")
+            mock_retry.assert_called_once()
+            _, kwargs = mock_retry.call_args
+            self.assertEqual(kwargs.get('countdown'), 30)
+
+    @patch('tracker.tasks.sync_user_media_task.delay')
+    def test_sync_beat_tasks_dispatching(self, mock_delay):
+        from tracker.tasks import sync_recent_active_users_task, sync_other_users_task
+
+        # User A da oxirgi 48 soat ichida post bor
+        Post.objects.create(
+            link=self.link_a,
+            ig_media_id='recent_post_900',
+            status='verified',
+            last_synced_at=timezone.now() - timedelta(hours=5),
+        )
+
+        # Beat task 1: oxirgi 48 soatdagi postli userlar
+        count_recent = sync_recent_active_users_task()
+        self.assertEqual(count_recent, 1)
+        mock_delay.assert_called_with(self.user_a.id)
+
+        mock_delay.reset_mock()
+
+        # Beat task 2: qolgan userlar (User B)
+        count_other = sync_other_users_task()
+        self.assertEqual(count_other, 1)
+        mock_delay.assert_called_with(self.user_b.id)
+
+
+class CampaignPostsApiTestCase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        # Admin user
+        self.admin_user = User.objects.create_superuser('admin_hero', 'admin@example.com', 'pass123')
+        self.admin_ig = InstagramUser.objects.create(name="Admin Hero", user=self.admin_user, status='connected')
+
+        # Regular user A
+        self.user_a = User.objects.create_user('john_doe', 'john@example.com', 'pass123')
+        self.ig_a = InstagramUser.objects.create(name="John Doe", user=self.user_a, status='connected', access_token='tok_a')
+        dummy_v1 = SimpleUploadedFile("v1.mp4", b"data", content_type="video/mp4")
+        self.link_a = UniqueLink.objects.create(user=self.ig_a, video=dummy_v1, code="JOHNA1")
+
+        # Regular user B
+        self.user_b = User.objects.create_user('jane_smith', 'jane@example.com', 'pass123')
+        self.ig_b = InstagramUser.objects.create(name="Jane Smith", user=self.user_b, status='connected', access_token='tok_b')
+        dummy_v2 = SimpleUploadedFile("v2.mp4", b"data", content_type="video/mp4")
+        self.link_b = UniqueLink.objects.create(user=self.ig_b, video=dummy_v2, code="JANEB2")
+
+        now = timezone.now()
+        self.post_a = Post.objects.create(
+            link=self.link_a,
+            ig_media_id='media_a_100',
+            status='verified',
+            source='self',
+            views=1500,
+            likes=150,
+            comments_count=25,
+            thumbnail_url='https://example.com/thumb_a.jpg',
+            permalink='https://instagram.com/reel/a100/',
+            posted_at=now,
+            last_synced_at=now,
+        )
+
+        self.post_b = Post.objects.create(
+            link=self.link_b,
+            ig_media_id='media_b_200',
+            status='verified',
+            source='site',
+            views=3000,
+            likes=300,
+            comments_count=50,
+            thumbnail_url='https://example.com/thumb_b.jpg',
+            permalink='https://instagram.com/reel/b200/',
+            posted_at=now,
+            last_synced_at=now,
+        )
+
+    def test_user_sees_only_own_posts(self):
+        self.client.force_authenticate(user=self.user_a)
+        resp = self.client.get('/api/user/posts/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        results = data.get('results', [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['id'], self.post_a.id)
+        self.assertEqual(results[0]['code'], 'JOHNA1')
+        self.assertEqual(results[0]['username'], 'john_doe')
+        self.assertEqual(results[0]['views'], 1500)
+        self.assertEqual(results[0]['likes'], 150)
+        self.assertEqual(results[0]['comments_count'], 25)
+
+        # User B ning posti bu yerda yo'q
+        post_ids = [r['id'] for r in results]
+        self.assertNotIn(self.post_b.id, post_ids)
+
+    def test_admin_sees_all_posts_with_identical_fields_and_numbers(self):
+        # 1. Foydalanuvchi A o'zinikini so'raydi
+        self.client.force_authenticate(user=self.user_a)
+        user_resp = self.client.get('/api/user/posts/')
+        self.assertEqual(user_resp.status_code, 200)
+        user_post_data = user_resp.json()['results'][0]
+
+        # 2. Admin hamma postlarni so'raydi
+        self.client.force_authenticate(user=self.admin_user)
+        admin_resp = self.client.get('/api/admin/campaign-posts/')
+        self.assertEqual(admin_resp.status_code, 200)
+        admin_data = admin_resp.json()
+        admin_results = admin_data.get('results', [])
+        self.assertEqual(len(admin_results), 2)
+
+        # Post A ni admin natijalaridan topamiz
+        admin_post_a = next(r for r in admin_results if r['id'] == self.post_a.id)
+
+        # Serializer maydonlari va raqamlar har ikkalasida aynan bir xil
+        expected_fields = {
+            'id', 'thumbnail_url', 'permalink', 'status', 'source',
+            'views', 'likes', 'comments_count', 'posted_at',
+            'last_synced_at', 'username', 'code'
+        }
+        self.assertEqual(set(user_post_data.keys()), expected_fields)
+        self.assertEqual(set(admin_post_a.keys()), expected_fields)
+
+        self.assertEqual(user_post_data['views'], admin_post_a['views'])
+        self.assertEqual(user_post_data['likes'], admin_post_a['likes'])
+        self.assertEqual(user_post_data['comments_count'], admin_post_a['comments_count'])
+        self.assertEqual(user_post_data['status'], admin_post_a['status'])
+        self.assertEqual(user_post_data['source'], admin_post_a['source'])
+        self.assertEqual(user_post_data['code'], admin_post_a['code'])
+        self.assertEqual(user_post_data['username'], admin_post_a['username'])
+
+    def test_admin_campaign_posts_filters(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Status filtri
+        resp = self.client.get('/api/admin/campaign-posts/?status=verified')
+        self.assertEqual(resp.json()['count'], 2)
+
+        resp = self.client.get('/api/admin/campaign-posts/?status=revoked')
+        self.assertEqual(resp.json()['count'], 0)
+
+        # Source filtri
+        resp = self.client.get('/api/admin/campaign-posts/?source=self')
+        self.assertEqual(resp.json()['count'], 1)
+        self.assertEqual(resp.json()['results'][0]['id'], self.post_a.id)
+
+        resp = self.client.get('/api/admin/campaign-posts/?source=site')
+        self.assertEqual(resp.json()['count'], 1)
+        self.assertEqual(resp.json()['results'][0]['id'], self.post_b.id)
+
+        # Username filtri
+        resp = self.client.get('/api/admin/campaign-posts/?username=jane')
+        self.assertEqual(resp.json()['count'], 1)
+        self.assertEqual(resp.json()['results'][0]['username'], 'jane_smith')
+
+    @patch('tracker.views.sync_user_media_task.delay')
+    def test_user_sync_endpoint_and_throttle(self, mock_delay):
+        from django.core.cache import cache
+        cache.clear()
+
+        self.client.force_authenticate(user=self.user_a)
+
+        # 1-marta: muvaffaqiyatli (200, queued)
+        resp1 = self.client.post('/api/user/sync/')
+        self.assertEqual(resp1.status_code, 200)
+        self.assertEqual(resp1.json(), {"status": "queued"})
+        mock_delay.assert_called_with(self.ig_a.id)
+
+        # 2-marta: muvaffaqiyatli
+        resp2 = self.client.post('/api/user/sync/')
+        self.assertEqual(resp2.status_code, 200)
+
+        # 3-marta: muvaffaqiyatli
+        resp3 = self.client.post('/api/user/sync/')
+        self.assertEqual(resp3.status_code, 200)
+
+        # 4-marta: limitdan oshdi (429 Too Many Requests)
+        resp4 = self.client.post('/api/user/sync/')
+        self.assertEqual(resp4.status_code, 429)
+
+
+
+
+
 
 
 

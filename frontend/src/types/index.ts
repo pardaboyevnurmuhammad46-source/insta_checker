@@ -184,6 +184,21 @@ export interface VideoItem {
   created_at: string;
 }
 
+export interface CampaignPost {
+  id: number;
+  thumbnail_url: string | null;
+  permalink: string | null;
+  status: 'verified' | 'rejected' | 'revoked' | 'queued' | 'publishing' | 'published' | 'deleted' | 'failed';
+  source: 'site' | 'self';
+  views: number;
+  likes: number;
+  comments_count: number;
+  posted_at: string | null;
+  last_synced_at: string | null;
+  username: string;
+  code: string;
+}
+
 export interface PublishStatus {
   has_post: boolean;
   post_id?: number;
@@ -199,6 +214,7 @@ export interface PublishStatus {
   retries_left?: number;
   can_publish?: boolean;
   can_publish_reason?: string | null;
+  code?: string | null;
   upload_limits?: {
     max_size_mb: number;
     allowed_types: string[];

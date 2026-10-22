@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '../../api/client';
-import type { Post, PaginatedResponse, InstagramUser } from '../../types';
+import type { CampaignPost, PaginatedResponse } from '../../types';
 import { Pagination } from '../../components/Pagination';
 import { useToast } from '../../context/ToastContext';
-import { formatNumber, formatDate } from '../../utils/format';
+import { formatNumber, formatDate, formatTimeAgo } from '../../utils/format';
 import {
   ExternalLink,
   RefreshCw,
@@ -14,14 +14,16 @@ import {
   Eye,
   Heart,
   MessageCircle,
+  Search,
+  Film,
 } from 'lucide-react';
 
 export const AdminPostsPage: React.FC = () => {
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<CampaignPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
-  const [ordering, setOrdering] = useState('-views');
-  const [userFilter, setUserFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
@@ -31,22 +33,7 @@ export const AdminPostsPage: React.FC = () => {
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  const [usersList, setUsersList] = useState<InstagramUser[]>([]);
-
   const { showToast } = useToast();
-
-  const fetchUsers = async () => {
-    try {
-      const res = await apiClient.get('/api/users/?page_size=100');
-      setUsersList(res.data.results || []);
-    } catch {
-      // ignore
-    }
-  };
-
-  useEffect(() => {
-    fetchUsers();
-  }, []);
 
   const fetchPosts = useCallback(async () => {
     try {
@@ -54,12 +41,12 @@ export const AdminPostsPage: React.FC = () => {
       const params = new URLSearchParams();
       params.append('page', page.toString());
       if (statusFilter) params.append('status', statusFilter);
-      if (ordering) params.append('ordering', ordering);
-      if (userFilter) params.append('user', userFilter);
+      if (sourceFilter) params.append('source', sourceFilter);
+      if (searchQuery) params.append('search', searchQuery);
       if (startDate) params.append('start_date', startDate);
       if (endDate) params.append('end_date', endDate);
 
-      const response = await apiClient.get<PaginatedResponse<Post>>(`/api/admin/posts/?${params.toString()}`);
+      const response = await apiClient.get<PaginatedResponse<CampaignPost>>(`/api/admin/campaign-posts/?${params.toString()}`);
       setPosts(response.data.results || []);
       setTotalCount(response.data.count || 0);
     } catch {
@@ -67,7 +54,7 @@ export const AdminPostsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, ordering, userFilter, startDate, endDate, showToast]);
+  }, [page, statusFilter, sourceFilter, searchQuery, startDate, endDate, showToast]);
 
   useEffect(() => {
     fetchPosts();
@@ -106,7 +93,8 @@ export const AdminPostsPage: React.FC = () => {
       setExporting(true);
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
-      if (userFilter) params.append('user', userFilter);
+      if (sourceFilter) params.append('source', sourceFilter);
+      if (searchQuery) params.append('search', searchQuery);
       if (startDate) params.append('start_date', startDate);
       if (endDate) params.append('end_date', endDate);
 
@@ -129,26 +117,37 @@ export const AdminPostsPage: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (post: Post) => {
+  const getStatusBadge = (post: CampaignPost) => {
     switch (post.status) {
-      case 'published':
+      case 'verified':
         return (
           <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
+            Tasdiqlangan
+          </span>
+        );
+      case 'revoked':
+        return (
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-800">
+            Bekor qilingan
+          </span>
+        );
+      case 'rejected':
+        return (
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800">
+            Rad etilgan
+          </span>
+        );
+      case 'published':
+        return (
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-950 text-blue-400 border border-blue-800">
             Joylandi
           </span>
         );
       case 'deleted':
         return (
-          <div className="flex flex-col">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800 inline-flex items-center gap-1 w-max">
-              <AlertTriangle size={11} /> O'chirilgan
-            </span>
-            {post.deleted_detected_at && (
-              <span className="text-[10px] text-slate-500 mt-0.5">
-                {formatDate(post.deleted_detected_at)}
-              </span>
-            )}
-          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800 inline-flex items-center gap-1 w-max">
+            <AlertTriangle size={11} /> O'chirilgan
+          </span>
         );
       case 'publishing':
         return (
@@ -199,6 +198,21 @@ export const AdminPostsPage: React.FC = () => {
 
       {/* Filters and Sorting Bar */}
       <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex flex-wrap items-center gap-3">
+        {/* Qidiruv */}
+        <div className="relative min-w-[220px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Foydalanuvchi yoki kod..."
+            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600"
+          />
+        </div>
+
         {/* Status */}
         <select
           value={statusFilter}
@@ -209,44 +223,26 @@ export const AdminPostsPage: React.FC = () => {
           className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           <option value="">Barcha holatlar</option>
+          <option value="verified">Tasdiqlangan (Verified)</option>
+          <option value="revoked">Bekor qilingan (Revoked)</option>
+          <option value="rejected">Rad etilgan (Rejected)</option>
           <option value="published">Joylashtirilgan</option>
-          <option value="deleted">O'chirilgan</option>
-          <option value="failed">Xatolik</option>
-          <option value="publishing">Yuklanmoqda</option>
           <option value="queued">Navbatda</option>
+          <option value="failed">Xatolik</option>
         </select>
 
-        {/* User filter */}
+        {/* Source */}
         <select
-          value={userFilter}
+          value={sourceFilter}
           onChange={(e) => {
-            setUserFilter(e.target.value);
-            setPage(1);
-          }}
-          className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-xs"
-        >
-          <option value="">Barcha foydalanuvchilar</option>
-          {usersList.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name} (ID #{u.id})
-            </option>
-          ))}
-        </select>
-
-        {/* Ordering */}
-        <select
-          value={ordering}
-          onChange={(e) => {
-            setOrdering(e.target.value);
+            setSourceFilter(e.target.value);
             setPage(1);
           }}
           className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
-          <option value="-views">Ko'rishlar (ko'pdan kamga)</option>
-          <option value="views">Ko'rishlar (kamdan ko'pga)</option>
-          <option value="-posted_at">Joylashtirilgan sana (eng yangi)</option>
-          <option value="posted_at">Joylashtirilgan sana (eng eski)</option>
-          <option value="-id">Post ID (eng yangi)</option>
+          <option value="">Barcha manbalar</option>
+          <option value="site">Sayt (site)</option>
+          <option value="self">O'zim (self)</option>
         </select>
 
         {/* Date Filters */}
@@ -274,11 +270,12 @@ export const AdminPostsPage: React.FC = () => {
           />
         </div>
 
-        {(statusFilter || userFilter || startDate || endDate) && (
+        {(statusFilter || sourceFilter || searchQuery || startDate || endDate) && (
           <button
             onClick={() => {
               setStatusFilter('');
-              setUserFilter('');
+              setSourceFilter('');
+              setSearchQuery('');
               setStartDate('');
               setEndDate('');
               setPage(1);
@@ -296,13 +293,17 @@ export const AdminPostsPage: React.FC = () => {
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-900/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
               <tr>
-                <th className="py-3.5 px-4">Post ID</th>
+                <th className="py-3.5 px-4">Video</th>
+                <th className="py-3.5 px-4">ID</th>
                 <th className="py-3.5 px-4">Foydalanuvchi</th>
+                <th className="py-3.5 px-4">Kod</th>
                 <th className="py-3.5 px-4">Holati</th>
+                <th className="py-3.5 px-4">Manba</th>
                 <th className="py-3.5 px-4">Ko'rishlar</th>
                 <th className="py-3.5 px-4">Like</th>
                 <th className="py-3.5 px-4">Izoh</th>
                 <th className="py-3.5 px-4">Sana</th>
+                <th className="py-3.5 px-4">Sinxronizatsiya</th>
                 <th className="py-3.5 px-4">Havola</th>
                 <th className="py-3.5 px-4 text-right">Amallar</th>
               </tr>
@@ -310,14 +311,14 @@ export const AdminPostsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60">
               {loading && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={13} className="py-12 text-center text-slate-500 text-sm">
                     Yuklanmoqda...
                   </td>
                 </tr>
               )}
               {!loading && posts.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={13} className="py-12 text-center text-slate-500 text-sm">
                     Postlar topilmadi.
                   </td>
                 </tr>
@@ -325,9 +326,36 @@ export const AdminPostsPage: React.FC = () => {
               {!loading &&
                 posts.map((post) => (
                   <tr key={post.id} className="hover:bg-slate-900/40 transition">
+                    <td className="py-3 px-4">
+                      {post.thumbnail_url ? (
+                        <img
+                          src={post.thumbnail_url}
+                          alt="Thumbnail"
+                          className="w-10 h-14 object-cover rounded-md border border-slate-700"
+                        />
+                      ) : (
+                        <div className="w-10 h-14 bg-slate-800 rounded-md border border-slate-700 flex items-center justify-center">
+                          <Film size={16} className="text-slate-500" />
+                        </div>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4 font-mono text-xs text-slate-500">#{post.id}</td>
-                    <td className="py-3.5 px-4 font-medium text-white">{post.user_name || '—'}</td>
+                    <td className="py-3.5 px-4 font-medium text-white">{post.username || '—'}</td>
+                    <td className="py-3.5 px-4 font-mono font-semibold text-amber-400">
+                      {post.code || '—'}
+                    </td>
                     <td className="py-3.5 px-4">{getStatusBadge(post)}</td>
+                    <td className="py-3.5 px-4">
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded ${
+                          post.source === 'site'
+                            ? 'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                            : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        {post.source === 'site' ? 'Sayt' : "O'zim"}
+                      </span>
+                    </td>
                     <td className="py-3.5 px-4 font-semibold text-sky-400">
                       <span className="inline-flex items-center gap-1.5">
                         <Eye size={14} />
@@ -348,6 +376,9 @@ export const AdminPostsPage: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4 text-xs text-slate-400">
                       {formatDate(post.posted_at)}
+                    </td>
+                    <td className="py-3.5 px-4 text-xs text-slate-400">
+                      {post.last_synced_at ? `Yangilandi: ${formatTimeAgo(post.last_synced_at)}` : '—'}
                     </td>
                     <td className="py-3.5 px-4">
                       {post.permalink ? (

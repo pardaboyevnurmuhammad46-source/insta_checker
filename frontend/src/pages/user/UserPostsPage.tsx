@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../api/client';
-import type { Post, PostStat, PaginatedResponse } from '../../types';
-import { formatNumber, formatDate } from '../../utils/format';
+import type { CampaignPost, PostStat, PaginatedResponse } from '../../types';
+import { formatNumber, formatDate, formatTimeAgo } from '../../utils/format';
 import { Pagination } from '../../components/Pagination';
 import {
   Eye,
@@ -10,11 +10,8 @@ import {
   ExternalLink,
   LineChart as ChartIcon,
   X,
-  AlertTriangle,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   RefreshCw,
+  Film,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -27,22 +24,21 @@ import {
 } from 'recharts';
 
 export const UserPostsPage: React.FC = () => {
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<CampaignPost[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [ordering, setOrdering] = useState('-id');
 
   // History modal
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [selectedPost, setSelectedPost] = useState<CampaignPost | null>(null);
   const [historyStats, setHistoryStats] = useState<PostStat[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const fetchPosts = async (pageNumber: number, order = ordering) => {
+  const fetchPosts = async (pageNumber: number) => {
     try {
       setLoading(true);
-      const res = await apiClient.get<PaginatedResponse<Post>>(
-        `/api/me/posts/?page=${pageNumber}&ordering=${order}`
+      const res = await apiClient.get<PaginatedResponse<CampaignPost>>(
+        `/api/user/posts/?page=${pageNumber}`
       );
       setPosts(res.data.results || []);
       setTotalCount(res.data.count || 0);
@@ -54,26 +50,10 @@ export const UserPostsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchPosts(page, ordering);
-  }, [page, ordering]);
+    fetchPosts(page);
+  }, [page]);
 
-  const toggleSort = (field: string) => {
-    const nextOrdering = ordering === `-${field}` ? field : `-${field}`;
-    setOrdering(nextOrdering);
-    setPage(1);
-  };
-
-  const getSortIcon = (field: string) => {
-    if (ordering === `-${field}`) {
-      return <ArrowDown size={14} className="text-indigo-400 inline ml-1" />;
-    }
-    if (ordering === field) {
-      return <ArrowUp size={14} className="text-indigo-400 inline ml-1" />;
-    }
-    return <ArrowUpDown size={13} className="text-slate-500 inline ml-1 opacity-40 group-hover:opacity-100 transition" />;
-  };
-
-  const handleOpenHistory = async (post: Post) => {
+  const handleOpenHistory = async (post: CampaignPost) => {
     setSelectedPost(post);
     setLoadingHistory(true);
     try {
@@ -92,8 +72,7 @@ export const UserPostsPage: React.FC = () => {
     try {
       const res = await apiClient.get<PostStat[]>(`/api/me/posts/${selectedPost.id}/history/`);
       setHistoryStats(res.data || []);
-      // Postlar ro'yxatini ham yangilab qo'yamiz
-      fetchPosts(page, ordering);
+      fetchPosts(page);
     } catch {
       // ignore
     } finally {
@@ -101,31 +80,30 @@ export const UserPostsPage: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (post: Post) => {
+  const getStatusBadge = (post: CampaignPost) => {
     switch (post.status) {
-      case 'published':
+      case 'verified':
         return (
           <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
-            Joylandi
+            Tasdiqlangan
           </span>
         );
-      case 'deleted':
+      case 'revoked':
         return (
-          <div className="flex flex-col">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800 inline-flex items-center gap-1 w-max">
-              <AlertTriangle size={11} /> O'chirilgan
-            </span>
-            {post.deleted_detected_at && (
-              <span className="text-[10px] text-slate-500 mt-0.5">
-                {formatDate(post.deleted_detected_at)}
-              </span>
-            )}
-          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-800">
+            Bekor qilingan
+          </span>
         );
-      case 'publishing':
+      case 'rejected':
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-950 text-indigo-400 border border-indigo-800">
-            Yuklanmoqda
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800">
+            Rad etilgan
+          </span>
+        );
+      case 'published':
+        return (
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-950 text-blue-400 border border-blue-800">
+            Joylandi
           </span>
         );
       case 'queued':
@@ -165,47 +143,15 @@ export const UserPostsPage: React.FC = () => {
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-900/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
               <tr>
-                <th
-                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
-                  onClick={() => toggleSort('id')}
-                >
-                  <span className="inline-flex items-center">
-                    Post ID {getSortIcon('id')}
-                  </span>
-                </th>
-                <th
-                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
-                  onClick={() => toggleSort('posted_at')}
-                >
-                  <span className="inline-flex items-center">
-                    Sana {getSortIcon('posted_at')}
-                  </span>
-                </th>
+                <th className="py-3.5 px-4">Video</th>
+                <th className="py-3.5 px-4">Kod</th>
                 <th className="py-3.5 px-4">Holati</th>
-                <th
-                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
-                  onClick={() => toggleSort('views')}
-                >
-                  <span className="inline-flex items-center">
-                    Ko'rishlar {getSortIcon('views')}
-                  </span>
-                </th>
-                <th
-                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
-                  onClick={() => toggleSort('likes')}
-                >
-                  <span className="inline-flex items-center">
-                    Like {getSortIcon('likes')}
-                  </span>
-                </th>
-                <th
-                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
-                  onClick={() => toggleSort('comments_count')}
-                >
-                  <span className="inline-flex items-center">
-                    Izoh {getSortIcon('comments_count')}
-                  </span>
-                </th>
+                <th className="py-3.5 px-4">Manba</th>
+                <th className="py-3.5 px-4">Ko'rishlar</th>
+                <th className="py-3.5 px-4">Like</th>
+                <th className="py-3.5 px-4">Izoh</th>
+                <th className="py-3.5 px-4">Joylandi</th>
+                <th className="py-3.5 px-4">Sinxronizatsiya</th>
                 <th className="py-3.5 px-4">Havola</th>
                 <th className="py-3.5 px-4 text-right">Tarix</th>
               </tr>
@@ -213,14 +159,14 @@ export const UserPostsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60">
               {loading && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={11} className="py-12 text-center text-slate-500 text-sm">
                     Yuklanmoqda...
                   </td>
                 </tr>
               )}
               {!loading && posts.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={11} className="py-12 text-center text-slate-500 text-sm">
                     Hozircha postlar mavjud emas.
                   </td>
                 </tr>
@@ -228,9 +174,34 @@ export const UserPostsPage: React.FC = () => {
               {!loading &&
                 posts.map((post) => (
                   <tr key={post.id} className="hover:bg-slate-900/40 transition">
-                    <td className="py-3 px-4 font-mono text-xs text-slate-400">#{post.id}</td>
-                    <td className="py-3 px-4 text-xs">{formatDate(post.posted_at)}</td>
+                    <td className="py-3 px-4">
+                      {post.thumbnail_url ? (
+                        <img
+                          src={post.thumbnail_url}
+                          alt="Thumbnail"
+                          className="w-10 h-14 object-cover rounded-md border border-slate-700"
+                        />
+                      ) : (
+                        <div className="w-10 h-14 bg-slate-800 rounded-md border border-slate-700 flex items-center justify-center">
+                          <Film size={16} className="text-slate-500" />
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 font-mono font-semibold text-amber-400">
+                      {post.code || '—'}
+                    </td>
                     <td className="py-3 px-4">{getStatusBadge(post)}</td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded ${
+                          post.source === 'site'
+                            ? 'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                            : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        {post.source === 'site' ? 'Sayt' : "O'zim"}
+                      </span>
+                    </td>
                     <td className="py-3 px-4 font-semibold text-white">
                       <span className="inline-flex items-center gap-1.5">
                         <Eye size={14} className="text-sky-400" />
@@ -248,6 +219,12 @@ export const UserPostsPage: React.FC = () => {
                         <MessageCircle size={14} className="text-emerald-400" />
                         {formatNumber(post.comments_count)}
                       </span>
+                    </td>
+                    <td className="py-3 px-4 text-xs text-slate-400">
+                      {formatDate(post.posted_at)}
+                    </td>
+                    <td className="py-3 px-4 text-xs text-slate-400">
+                      {post.last_synced_at ? `Yangilandi: ${formatTimeAgo(post.last_synced_at)}` : '—'}
                     </td>
                     <td className="py-3 px-4">
                       {post.permalink ? (

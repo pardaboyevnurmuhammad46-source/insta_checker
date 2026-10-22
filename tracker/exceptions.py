@@ -55,5 +55,28 @@ class InstagramMetricsNetworkError(InstagramMetricsError, InstagramNetworkError)
     pass
 
 
+class TokenInvalid(InstagramMetricsError):
+    """
+    Instagram access token yaroqsiz, muddati o'tgan yoki bekor qilingan (xato kodi 190).
+    """
+    def __init__(
+        self,
+        message: str = "Instagram access token yaroqsiz yoki muddati o'tgan (xato kodi 190)",
+        error_code: int = 190,
+        error_subcode: int | None = None,
+        status_code: int | None = 400,
+        **kwargs,
+    ):
+        super().__init__(
+            message=message,
+            is_auth_error=True,
+            error_type=InstagramErrorType.TOKEN_INVALID,
+            status_code=status_code,
+            error_code=error_code,
+            error_subcode=error_subcode,
+        )
+        self.extra = kwargs
+
+
 class MetaWebhookError(Exception):
     pass

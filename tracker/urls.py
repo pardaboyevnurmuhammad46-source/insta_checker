@@ -41,6 +41,9 @@ from .views import (
     me_notifications,
     me_notifications_read,
     me_prizes,
+    user_posts_list,
+    admin_campaign_posts_list,
+    user_sync_media,
 )
 
 from .dev_views import (
@@ -77,12 +80,15 @@ urlpatterns = [
     path('api/user/publish-status/', user_publish_status, name='user_publish_status'),
     path('api/user/retry/', user_retry_publish, name='user_retry_publish'),
     path('api/user/upload-video/', user_upload_video, name='user_upload_video'),
+    path('api/user/posts/', user_posts_list, name='user_posts_list'),
+    path('api/user/sync/', user_sync_media, name='user_sync_media'),
 
     # Admin endpoints
     path('api/admin/summary/', admin_summary, name='admin_summary'),
     path('api/admin/users/', admin_users_list, name='admin_users_list'),
     path('api/admin/users/<int:user_id>/', admin_user_detail, name='admin_user_detail'),
     path('api/admin/posts/', admin_posts_list, name='admin_posts_list'),
+    path('api/admin/campaign-posts/', admin_campaign_posts_list, name='admin_campaign_posts_list'),
     path('api/admin/stats/daily/', admin_stats_daily, name='admin_stats_daily'),
     path('api/admin/export/posts.csv', admin_export_posts_csv, name='admin_export_posts_csv'),
     path('api/admin/create-user/', admin_create_user, name='admin_create_user'),

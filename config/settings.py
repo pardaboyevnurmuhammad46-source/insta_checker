@@ -179,6 +179,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_RATES': {
         'login': '5/minute',
+        'user_sync': '3/minute',
     },
 }
 
@@ -236,6 +237,16 @@ CELERY_BEAT_SCHEDULE = {
     'refresh-expiring-instagram-tokens': {
         'task': 'tracker.tasks.refresh_expiring_tokens_task',
         'schedule': crontab(hour=3, minute=0),
+    },
+    # Har 10 daqiqada oxirgi 48 soatdagi postli userlarni sinxronizatsiya qilish
+    'sync-recent-active-users-media': {
+        'task': 'tracker.tasks.sync_recent_active_users_task',
+        'schedule': 600.0,
+    },
+    # Har soatda qolgan barcha foydalanuvchilarni sinxronizatsiya qilish
+    'sync-other-users-media': {
+        'task': 'tracker.tasks.sync_other_users_task',
+        'schedule': 3600.0,
     },
 }
 
