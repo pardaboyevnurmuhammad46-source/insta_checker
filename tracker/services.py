@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
+import sys
 import time
 import urllib.parse
 import uuid
@@ -182,6 +183,46 @@ def get_media_permalink(ig_media_id: str, access_token: str) -> str:
     return get_instagram_client().get_media_permalink(ig_media_id, access_token)
 
 
+def validate_video_orientation(file_field) -> str | None:
+    """
+    MP4 faylining tkhd atomini tekshirib, video yo'nalishini (vertikal/gorizontal) aniqlaydi.
+    Instagram Reels faqat vertikal (9:16 yoki 4:5) videolarni qabul qiladi.
+    Gorizontal (16:9) bo'lsa xato xabari qaytaradi.
+    """
+    try:
+        if hasattr(file_field, 'open'):
+            file_field.open('rb')
+        pos_before = file_field.tell() if hasattr(file_field, 'tell') else 0
+        file_field.seek(0)
+        data = file_field.read(1024 * 1024)  # Dastlabki 1 MB
+        file_field.seek(pos_before)
+
+        import struct
+        idx = 0
+        while True:
+            pos = data.find(b'tkhd', idx)
+            if pos == -1:
+                break
+            version = data[pos + 4]
+            offset = 80 if version == 0 else 92
+            if pos + offset + 8 <= len(data):
+                w_raw, h_raw = struct.unpack('>II', data[pos + offset : pos + offset + 8])
+                w = w_raw / 65536.0
+                h = h_raw / 65536.0
+                if w > 0 and h > 0:
+                    if w > h:
+                        return (
+                            f"Video o'lchami ({int(w)}x{int(h)}) gorizontal (16:9 formatda). "
+                            "Instagram Reels faqat vertikal (9:16 formatda, masalan 720x1280 yoki 1080x1920) "
+                            "videolarni qabul qiladi. Gorizontal video Instagram tomonidan rad etiladi."
+                        )
+                    return None
+            idx = pos + 4
+    except Exception as exc:
+        logger.debug("Video o'lchamlarini tekshirishda xatolik: %s", exc)
+    return None
+
+
 def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     try:
         link = UniqueLink.objects.select_related('user').get(id=link_id)
@@ -232,6 +273,18 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         link.save(update_fields=['status'])
         raise InstagramPublishError(err_msg)
 
+    # Video formati (orientatsiyasi) tekshiruvi: faqat vertikal Reels qabul qilinadi
+    if file_size > 1024:
+        orientation_err = validate_video_orientation(chosen_video.file)
+        if orientation_err:
+            post, _ = Post.objects.get_or_create(link=link)
+            post.status = 'failed'
+            post.error = orientation_err
+            post.save(update_fields=['status', 'error'])
+            link.status = 'failed'
+            link.save(update_fields=['status'])
+            raise InstagramPublishError(orientation_err)
+
     if link.video != chosen_video:
         link.video = chosen_video
         link.save(update_fields=['video'])
@@ -251,6 +304,37 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         base = getattr(settings, 'PUBLIC_BASE_URL', '') or getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
         base = base.rstrip('/')
         video_url = f"{base}{video_url}"
+
+    # Ommaviy manzil tekshiruvi (faqat real Instagram API rejimida)
+    if getattr(settings, 'INSTAGRAM_MODE', 'real') != 'mock':
+        if '127.0.0.1' in video_url or 'localhost' in video_url:
+            err_msg = (
+                "Video manzili lokal (127.0.0.1/localhost). Instagram serverlari videoni yuklay olishi uchun "
+                "ommaviy HTTPS manzil (PUBLIC_BASE_URL, masalan ngrok) sozlangan bo'lishi shart."
+            )
+            post.status = 'failed'
+            post.error = err_msg
+            post.save(update_fields=['status', 'error'])
+            link.status = 'failed'
+            link.save(update_fields=['status'])
+            raise InstagramPublishError(err_msg)
+
+        if 'ngrok' in video_url and 'test' not in sys.argv:
+            try:
+                check_resp = requests.head(video_url, timeout=3)
+                if check_resp.status_code == 404 and 'ngrok-error-code' in check_resp.headers:
+                    err_msg = (
+                        "PUBLIC_BASE_URL da ko'rsatilgan ngrok tunnel to'xtagan yoki eskirgan (ERR_NGROK_3200). "
+                        "Instagram videoni yuklay olmaydi. Iltimos, serverda ngrok'ni qayta ishga tushiring."
+                    )
+                    post.status = 'failed'
+                    post.error = err_msg
+                    post.save(update_fields=['status', 'error'])
+                    link.status = 'failed'
+                    link.save(update_fields=['status'])
+                    raise InstagramPublishError(err_msg)
+            except requests.RequestException:
+                pass
 
     try:
         container_id = create_reels_container(

@@ -11,6 +11,10 @@ import {
   LineChart as ChartIcon,
   X,
   AlertTriangle,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -27,16 +31,19 @@ export const UserPostsPage: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [ordering, setOrdering] = useState('-id');
 
   // History modal
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [historyStats, setHistoryStats] = useState<PostStat[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const fetchPosts = async (pageNumber: number) => {
+  const fetchPosts = async (pageNumber: number, order = ordering) => {
     try {
       setLoading(true);
-      const res = await apiClient.get<PaginatedResponse<Post>>(`/api/me/posts/?page=${pageNumber}`);
+      const res = await apiClient.get<PaginatedResponse<Post>>(
+        `/api/me/posts/?page=${pageNumber}&ordering=${order}`
+      );
       setPosts(res.data.results || []);
       setTotalCount(res.data.count || 0);
     } catch {
@@ -47,8 +54,24 @@ export const UserPostsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchPosts(page);
-  }, [page]);
+    fetchPosts(page, ordering);
+  }, [page, ordering]);
+
+  const toggleSort = (field: string) => {
+    const nextOrdering = ordering === `-${field}` ? field : `-${field}`;
+    setOrdering(nextOrdering);
+    setPage(1);
+  };
+
+  const getSortIcon = (field: string) => {
+    if (ordering === `-${field}`) {
+      return <ArrowDown size={14} className="text-indigo-400 inline ml-1" />;
+    }
+    if (ordering === field) {
+      return <ArrowUp size={14} className="text-indigo-400 inline ml-1" />;
+    }
+    return <ArrowUpDown size={13} className="text-slate-500 inline ml-1 opacity-40 group-hover:opacity-100 transition" />;
+  };
 
   const handleOpenHistory = async (post: Post) => {
     setSelectedPost(post);
@@ -58,6 +81,21 @@ export const UserPostsPage: React.FC = () => {
       setHistoryStats(res.data || []);
     } catch {
       setHistoryStats([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleRefreshHistory = async () => {
+    if (!selectedPost) return;
+    setLoadingHistory(true);
+    try {
+      const res = await apiClient.get<PostStat[]>(`/api/me/posts/${selectedPost.id}/history/`);
+      setHistoryStats(res.data || []);
+      // Postlar ro'yxatini ham yangilab qo'yamiz
+      fetchPosts(page, ordering);
+    } catch {
+      // ignore
     } finally {
       setLoadingHistory(false);
     }
@@ -127,12 +165,47 @@ export const UserPostsPage: React.FC = () => {
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-900/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
               <tr>
-                <th className="py-3.5 px-4">Post ID</th>
-                <th className="py-3.5 px-4">Sana</th>
+                <th
+                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
+                  onClick={() => toggleSort('id')}
+                >
+                  <span className="inline-flex items-center">
+                    Post ID {getSortIcon('id')}
+                  </span>
+                </th>
+                <th
+                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
+                  onClick={() => toggleSort('posted_at')}
+                >
+                  <span className="inline-flex items-center">
+                    Sana {getSortIcon('posted_at')}
+                  </span>
+                </th>
                 <th className="py-3.5 px-4">Holati</th>
-                <th className="py-3.5 px-4">Ko'rishlar</th>
-                <th className="py-3.5 px-4">Like</th>
-                <th className="py-3.5 px-4">Izoh</th>
+                <th
+                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
+                  onClick={() => toggleSort('views')}
+                >
+                  <span className="inline-flex items-center">
+                    Ko'rishlar {getSortIcon('views')}
+                  </span>
+                </th>
+                <th
+                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
+                  onClick={() => toggleSort('likes')}
+                >
+                  <span className="inline-flex items-center">
+                    Like {getSortIcon('likes')}
+                  </span>
+                </th>
+                <th
+                  className="py-3.5 px-4 cursor-pointer select-none group hover:text-white transition"
+                  onClick={() => toggleSort('comments_count')}
+                >
+                  <span className="inline-flex items-center">
+                    Izoh {getSortIcon('comments_count')}
+                  </span>
+                </th>
                 <th className="py-3.5 px-4">Havola</th>
                 <th className="py-3.5 px-4 text-right">Tarix</th>
               </tr>
@@ -219,19 +292,34 @@ export const UserPostsPage: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
               <div>
-                <h3 className="font-semibold text-white text-base">
-                  Post #{selectedPost.id} Ko'rishlar Tarixi
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-white text-base">
+                    Post #{selectedPost.id} Ko'rishlar Tarixi
+                  </h3>
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
+                    Har 5 daqiqada yangilanadi
+                  </span>
+                </div>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Vaqt boʻyicha oʻsish grafigi
+                  Vaqt boʻyicha oʻsish grafigi ({historyStats.length} ta yozuv)
                 </p>
               </div>
-              <button
-                onClick={() => setSelectedPost(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRefreshHistory}
+                  disabled={loadingHistory}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700 transition disabled:opacity-50"
+                  title="Qayta tekshirish va yangilash"
+                >
+                  <RefreshCw size={15} className={loadingHistory ? 'animate-spin' : ''} />
+                </button>
+                <button
+                  onClick={() => setSelectedPost(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="p-6">

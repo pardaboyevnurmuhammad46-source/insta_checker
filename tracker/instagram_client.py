@@ -263,7 +263,14 @@ class RealInstagramClient(InstagramClient):
             if status_code == 'FINISHED':
                 return True
             elif status_code in ('ERROR', 'EXPIRED'):
-                raise InstagramPublishError(f"Reels yuklash xatoligi: {status_data}")
+                err_hint = (
+                    f"Reels yuklash xatoligi: {status_data}. "
+                    "Mumkin bo'lgan sabablar: "
+                    "1) Video Reels talablariga mos emas (vertikal 9:16 emas, masalan gorizontal 16:9); "
+                    "2) Video havolasi (PUBLIC_BASE_URL/ngrok) tashqi tarmoqdan yuklab bo'lmaydi yoki ngrok to'xtagan; "
+                    "3) Akkauntning kunlik Reels joylash limiti (25-50 ta) tugagan."
+                )
+                raise InstagramPublishError(err_hint)
             time.sleep(delay)
 
         raise InstagramPublishNetworkError("Reels videosini qayta ishlash vaqti tugadi (timeout).")

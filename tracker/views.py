@@ -74,6 +74,7 @@ from .services import (
     handle_data_deletion_request,
     refresh_user_token,
     get_configured_milestones,
+    update_post_metrics,
 )
 from .tasks import publish_reels_task, check_post_metrics_task
 from .instagram_errors import get_instagram_errors_last_hour
@@ -259,6 +260,13 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['get'], url_path='stats')
     def stats(self, request, pk=None):
         post = self.get_object()
+        if post.status == 'published' and post.ig_media_id:
+            now = timezone.now()
+            if not post.last_checked_at or (now - post.last_checked_at) >= timedelta(minutes=5):
+                try:
+                    update_post_metrics(post)
+                except Exception as exc:
+                    logger.warning("PostViewSet.stats ichida metrikalarni yangilashda xatolik: %s", exc)
         stats_qs = post.stats.all().order_by('-checked_at')
         return Response(PostStatSerializer(stats_qs, many=True).data)
 
@@ -513,14 +521,26 @@ def me_summary(request):
 @permission_classes([IsAuthenticated])
 def me_posts(request):
     """
-    Foydalanuvchining o'z postlari (pagination bilan).
+    Foydalanuvchining o'z postlari (pagination bilan va tartiblash imkoniyati).
     """
     user = request.user
     ig_user = getattr(user, 'instagram_user', None)
     if not ig_user:
         return Response({"count": 0, "next": None, "previous": None, "results": []})
 
-    qs = Post.objects.select_related('link__user').filter(link__user=ig_user).order_by('-id')
+    ordering = request.GET.get('ordering', '-id')
+    allowed_orderings = {
+        'id', '-id',
+        'views', '-views',
+        'posted_at', '-posted_at',
+        'likes', '-likes',
+        'comments_count', '-comments_count',
+        'status', '-status',
+    }
+    if ordering not in allowed_orderings:
+        ordering = '-id'
+
+    qs = Post.objects.select_related('link__user').filter(link__user=ig_user).order_by(ordering)
     paginator = StandardResultsSetPagination()
     page = paginator.paginate_queryset(qs, request)
     serializer = PostSerializer(page, many=True)
@@ -532,6 +552,8 @@ def me_posts(request):
 def me_post_history(request, post_id):
     """
     PostStat tarixi (grafik uchun, vaqt bo'yicha o'sish tartibida).
+    Agar post nashr qilingan bo'lsa va oxirgi tekshiruvdan kamida 5 daqiqa o'tgan bo'lsa,
+    foydalanuvchi ko'rganda yangi metrikalar olinib, PostStat yoziladi.
     """
     user = request.user
     ig_user = getattr(user, 'instagram_user', None)
@@ -539,6 +561,15 @@ def me_post_history(request, post_id):
         return Response({"error": "Post topilmadi"}, status=status.HTTP_404_NOT_FOUND)
 
     post = get_object_or_404(Post.objects.select_related('link__user'), id=post_id, link__user=ig_user)
+
+    if post.status == 'published' and post.ig_media_id:
+        now = timezone.now()
+        if not post.last_checked_at or (now - post.last_checked_at) >= timedelta(minutes=5):
+            try:
+                update_post_metrics(post)
+            except Exception as exc:
+                logger.warning("me_post_history ichida post metrikasini yangilashda xatolik: %s", exc)
+
     stats = post.stats.all().order_by('checked_at')
     data = [
         {

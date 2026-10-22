@@ -1409,9 +1409,11 @@ class Phase4UserInstagramAndPublishTestCase(TestCase):
         self.assertIn(resp.status_code, (403, 404))
 
     @patch('tracker.services.verify_token_permissions')
+    @patch('tracker.services.get_long_lived_token')
     @patch('tracker.services.exchange_code_for_token')
-    def test_missing_permissions_rejected(self, mock_exchange, mock_perms):
+    def test_missing_permissions_rejected(self, mock_exchange, mock_long_token, mock_perms):
         mock_exchange.return_value = {'access_token': 'short_token', 'user_id': '17841'}
+        mock_long_token.return_value = {'access_token': 'long_token', 'expires_in': 5184000}
         mock_perms.return_value = (False, ['instagram_business_manage_insights'])
 
         link = UniqueLink.objects.create(user=self.ig_user1)
@@ -2699,6 +2701,94 @@ class InstagramWebhookTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
         mock_task.assert_called_once_with(post.id)
+
+
+class Phase7EnhancementsTestCase(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from .services import validate_video_orientation
+        self.validate_video_orientation = validate_video_orientation
+        self.user = User.objects.create_user(username='enh_user', password='password123')
+        self.ig_user = InstagramUser.objects.create(
+            user=self.user,
+            name="Enh User",
+            status='connected',
+            access_token='valid_token_123',
+            ig_user_id='ig_123456'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_video_orientation_detection(self):
+        import io, struct
+        # Gorizontal video (width=1920, height=1080)
+        buf_horiz = io.BytesIO()
+        buf_horiz.write(b'\x00' * 16)
+        buf_horiz.write(b'tkhd')
+        buf_horiz.write(b'\x00') # version
+        buf_horiz.write(b'\x00' * 75)
+        buf_horiz.write(struct.pack('>II', int(1920 * 65536), int(1080 * 65536)))
+        buf_horiz.write(b'\x00' * 100)
+        buf_horiz.seek(0)
+        err = self.validate_video_orientation(buf_horiz)
+        self.assertIsNotNone(err)
+        self.assertIn("gorizontal", err)
+
+        # Vertikal video (width=1080, height=1920)
+        buf_vert = io.BytesIO()
+        buf_vert.write(b'\x00' * 16)
+        buf_vert.write(b'tkhd')
+        buf_vert.write(b'\x00') # version
+        buf_vert.write(b'\x00' * 75)
+        buf_vert.write(struct.pack('>II', int(1080 * 65536), int(1920 * 65536)))
+        buf_vert.write(b'\x00' * 100)
+        buf_vert.seek(0)
+        self.assertIsNone(self.validate_video_orientation(buf_vert))
+
+    def test_me_posts_ordering_views_and_date(self):
+        link1 = UniqueLink.objects.create(user=self.ig_user)
+        link2 = UniqueLink.objects.create(user=self.ig_user)
+        now = timezone.now()
+        post1 = Post.objects.create(link=link1, views=100, posted_at=now - timedelta(hours=2), status='published')
+        post2 = Post.objects.create(link=link2, views=500, posted_at=now - timedelta(hours=1), status='published')
+
+        # Views bo'yicha kamayish tartibi (-views)
+        resp = self.client.get('/api/me/posts/?ordering=-views')
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()['results']
+        self.assertEqual(results[0]['id'], post2.id)
+        self.assertEqual(results[1]['id'], post1.id)
+
+        # Views bo'yicha o'sish tartibi (views)
+        resp = self.client.get('/api/me/posts/?ordering=views')
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()['results']
+        self.assertEqual(results[0]['id'], post1.id)
+        self.assertEqual(results[1]['id'], post2.id)
+
+        # Sana bo'yicha kamayish tartibi (-posted_at)
+        resp = self.client.get('/api/me/posts/?ordering=-posted_at')
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()['results']
+        self.assertEqual(results[0]['id'], post2.id)
+
+    @patch('tracker.views.update_post_metrics')
+    def test_me_post_history_auto_refresh_every_5m(self, mock_update):
+        link = UniqueLink.objects.create(user=self.ig_user)
+        # Oxirgi tekshiruv 10 daqiqa oldin bo'lgan post
+        post = Post.objects.create(
+            link=link,
+            ig_media_id='ig_post_999',
+            status='published',
+            views=150,
+            last_checked_at=timezone.now() - timedelta(minutes=10)
+        )
+        PostStat.objects.create(post=post, views=100, checked_at=timezone.now() - timedelta(minutes=10))
+
+        resp = self.client.get(f'/api/me/posts/{post.id}/history/')
+        self.assertEqual(resp.status_code, 200)
+        # 5 daqiqadan oshgani uchun update_post_metrics chaqirilishi kerak
+        mock_update.assert_called_once_with(post)
 
 
 
