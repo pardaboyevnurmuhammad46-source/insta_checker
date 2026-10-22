@@ -275,15 +275,41 @@ export const AdminVideosPage: React.FC = () => {
                         <span className="text-slate-500 italic">Barchaga umumiy</span>
                       )}
                     </td>
-                    <td className="py-3.5 px-4">
-                      {v.is_active ? (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                          Faol
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400">
-                          Faol emas
-                        </span>
+                    <td className="py-3.5 px-4 space-y-1">
+                      <div>
+                        {v.is_active ? (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                            Faol
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400">
+                            Faol emas
+                          </span>
+                        )}
+                      </div>
+                      {v.status && (
+                        <div>
+                          {v.status === 'ready' && (
+                            <span className="text-[11px] font-medium text-emerald-400">
+                              Tayyor (9:16)
+                            </span>
+                          )}
+                          {v.status === 'processing' && (
+                            <span className="text-[11px] font-medium text-amber-400 inline-flex items-center gap-1">
+                              <Loader2 size={10} className="animate-spin" /> Tayyorlanmoqda
+                            </span>
+                          )}
+                          {v.status === 'failed' && (
+                            <span className="text-[11px] font-medium text-rose-400" title={v.processing_error || ''}>
+                              Xatolik
+                            </span>
+                          )}
+                          {v.status === 'pending' && (
+                            <span className="text-[11px] font-medium text-slate-400">
+                              Kutilmoqda
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-xs text-slate-400">

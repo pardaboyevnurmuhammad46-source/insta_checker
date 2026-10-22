@@ -111,6 +111,31 @@ export const UserVideoPage: React.FC = () => {
     };
   }, [publishStatus?.status]);
 
+  // Polling logic when video is processing or pending
+  useEffect(() => {
+    if (video?.id && (video.status === 'processing' || video.status === 'pending')) {
+      const timer = setInterval(async () => {
+        try {
+          const res = await apiClient.get<VideoItem>(`/api/videos/${video.id}/`);
+          if (res.data) {
+            setVideo(res.data);
+            if (res.data.status === 'ready') {
+              clearInterval(timer);
+              showToast("Video tayyor bo'ldi (9:16 Reels formati)!", 'success');
+              fetchData();
+            } else if (res.data.status === 'failed') {
+              clearInterval(timer);
+              showToast(res.data.processing_error || 'Videoni tayyorlashda xatolik yuz berdi', 'error');
+            }
+          }
+        } catch {
+          // ignore poll error
+        }
+      }, 2500);
+      return () => clearInterval(timer);
+    }
+  }, [video?.id, video?.status]);
+
   const handleConnectInstagram = async () => {
     try {
       setConnecting(true);
@@ -249,6 +274,8 @@ export const UserVideoPage: React.FC = () => {
 
   const isPublishingNow = publishStatus?.status === 'queued' || publishStatus?.status === 'publishing';
   const isPersonalVideo = Boolean(video?.owner && video.owner === user?.instagram_user?.id);
+  const isVideoProcessing = video?.status === 'processing' || video?.status === 'pending';
+  const isVideoFailed = video?.status === 'failed';
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
@@ -320,19 +347,66 @@ export const UserVideoPage: React.FC = () => {
             </h2>
           </div>
           {video && (
-            <span
-              className={`text-xs font-medium px-2.5 py-0.5 rounded border ${
-                isPersonalVideo
-                  ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                  : 'bg-indigo-950 text-indigo-400 border-indigo-800'
-              }`}
-            >
-              {isPersonalVideo ? 'Sizning shaxsiy videongiz' : 'Umumiy (Default) video'}
-            </span>
+            <div className="flex items-center gap-2">
+              {isVideoProcessing && (
+                <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded border bg-amber-950 text-amber-300 border-amber-800">
+                  <Loader2 size={12} className="animate-spin" /> Tayyorlanmoqda
+                </span>
+              )}
+              {isVideoFailed && (
+                <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded border bg-rose-950 text-rose-300 border-rose-800">
+                  <AlertCircle size={12} /> Xatolik
+                </span>
+              )}
+              {video.status === 'ready' && (
+                <span className="text-xs font-medium px-2.5 py-0.5 rounded border bg-emerald-950 text-emerald-400 border-emerald-800">
+                  Tayyor (9:16)
+                </span>
+              )}
+              <span
+                className={`text-xs font-medium px-2.5 py-0.5 rounded border ${
+                  isPersonalVideo
+                    ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                    : 'bg-indigo-950 text-indigo-400 border-indigo-800'
+                }`}
+              >
+                {isPersonalVideo ? 'Sizning shaxsiy videongiz' : 'Umumiy (Default) video'}
+              </span>
+            </div>
           )}
         </div>
 
         <div className="p-6 space-y-6">
+          {/* Video Processing Indicator */}
+          {isVideoProcessing && (
+            <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Loader2 size={20} className="text-amber-400 animate-spin shrink-0" />
+                <div>
+                  <h4 className="text-sm font-semibold text-white">Video tayyorlanmoqda...</h4>
+                  <p className="text-xs text-amber-300/80 mt-0.5">
+                    Server videoni Instagram Reels talablariga moslab 9:16 vertikal formatga o'tkazmoqda.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs px-2.5 py-1 rounded-full bg-amber-900/60 text-amber-300 border border-amber-700/60 font-medium">
+                Konvertatsiya
+              </span>
+            </div>
+          )}
+
+          {/* Video Failed Indicator */}
+          {isVideoFailed && (
+            <div className="p-4 rounded-xl border border-rose-800/80 bg-rose-950/20 flex items-start gap-3">
+              <AlertCircle size={20} className="text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-semibold text-white">Video tayyorlashda xatolik</h4>
+                <p className="text-xs text-rose-300 mt-1">
+                  {video?.processing_error || "Videoni qayta ishlashda xatolik yuz berdi. Iltimos, boshqa video yuklang."}
+                </p>
+              </div>
+            </div>
+          )}
           {video?.video_url || video?.file ? (
             <div className="space-y-4">
               <div className="bg-slate-900 rounded-xl overflow-hidden max-w-sm mx-auto border border-slate-800 aspect-[9/16] max-h-[460px] flex items-center justify-center shadow-lg">
@@ -557,14 +631,19 @@ export const UserVideoPage: React.FC = () => {
             <div className="flex flex-col items-center sm:items-end w-full sm:w-auto">
               <button
                 onClick={handlePublish}
-                disabled={publishing || isPublishingNow || !isConnected || !video}
+                disabled={publishing || isPublishingNow || !isConnected || !video || isVideoProcessing || isVideoFailed}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                title={publishStatus?.can_publish_reason || (!video ? 'Video yuklanmagan' : '')}
+                title={isVideoProcessing ? 'Video tayyorlanmoqda' : isVideoFailed ? (video?.processing_error || 'Video yaroqsiz') : publishStatus?.can_publish_reason || (!video ? 'Video yuklanmagan' : '')}
               >
                 {publishing || isPublishingNow ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
                     <span>Jarayonda ({elapsedSeconds}s)...</span>
+                  </>
+                ) : isVideoProcessing ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Video tayyorlanmoqda...</span>
                   </>
                 ) : publishStatus?.status === 'published' ? (
                   <>
@@ -581,6 +660,7 @@ export const UserVideoPage: React.FC = () => {
               {publishStatus?.can_publish_reason &&
                 !publishStatus.can_publish &&
                 !isPublishingNow &&
+                !isVideoProcessing &&
                 publishStatus?.status !== 'published' && (
                   <span className="text-xs text-rose-400 mt-1 max-w-[250px] text-center sm:text-right">
                     {publishStatus.can_publish_reason}
@@ -630,7 +710,7 @@ export const UserVideoPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                  Video Fayl (.mp4, vertikal 9:16, max 100MB)
+                  Video Fayl (.mp4, max 100MB)
                 </label>
                 <div className="border-2 border-dashed border-slate-800 hover:border-slate-700 bg-slate-950 rounded-xl p-5 text-center transition">
                   <input
@@ -647,7 +727,7 @@ export const UserVideoPage: React.FC = () => {
                       {selectedFile ? selectedFile.name : 'Video faylni tanlang'}
                     </span>
                     <span className="text-[11px] text-slate-500 mt-1">
-                      MP4 (H.264, AAC), 9:16 vertikal, 3 soniyadan 15 daqiqagacha
+                      MP4 (H.264, AAC), 3-90 soniya. Gorizontal video avtomatik 9:16 ga o'tkaziladi.
                     </span>
                   </label>
                 </div>

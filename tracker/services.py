@@ -267,6 +267,27 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         link.save(update_fields=['status'])
         raise InstagramPublishError(err_msg)
 
+    # Video holati tekshiruvi (tayyorlanmoqda yoki xatolik)
+    if chosen_video.status in ['pending', 'processing']:
+        err_msg = "Video hozirda tayyorlanmoqda (konvertatsiya qilinmoqda). Iltimos, video tayyor bo'lishini kuting."
+        post, _ = Post.objects.get_or_create(link=link)
+        post.status = 'failed'
+        post.error = err_msg
+        post.save(update_fields=['status', 'error'])
+        link.status = 'failed'
+        link.save(update_fields=['status'])
+        raise InstagramPublishError(err_msg)
+
+    if chosen_video.status == 'failed':
+        err_msg = f"Video yaroqsiz: {chosen_video.processing_error or 'Video qayta ishlashda xatolik yuz bergan.'}"
+        post, _ = Post.objects.get_or_create(link=link)
+        post.status = 'failed'
+        post.error = err_msg
+        post.save(update_fields=['status', 'error'])
+        link.status = 'failed'
+        link.save(update_fields=['status'])
+        raise InstagramPublishError(err_msg)
+
     # Video faylining mavjudligi va hajm tekshiruvi (dummy 4-10 baytli fayllar uchun)
     try:
         file_size = chosen_video.file.size if chosen_video.file else 0
@@ -283,7 +304,21 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         link.save(update_fields=['status'])
         raise InstagramPublishError(err_msg)
 
-    # Video formati (orientatsiyasi) tekshiruvi: faqat vertikal Reels qabul qilinadi
+    # Video davomiyligi tekshiruvi: 3 soniyadan 90 soniyagacha
+    if file_size > 1024 and hasattr(chosen_video.file, 'path') and os.path.exists(chosen_video.file.path):
+        from .video_utils import get_video_info, validate_video_duration
+        info = get_video_info(chosen_video.file.path)
+        dur_err = validate_video_duration(info.get('duration', 0.0))
+        if dur_err:
+            post, _ = Post.objects.get_or_create(link=link)
+            post.status = 'failed'
+            post.error = dur_err
+            post.save(update_fields=['status', 'error'])
+            link.status = 'failed'
+            link.save(update_fields=['status'])
+            raise InstagramPublishError(dur_err)
+
+    # Video formati (orientatsiyasi) tekshiruvi: konvertatsiyadan keyingi faylni tekshiramiz
     if file_size > 1024:
         orientation_err = validate_video_orientation(chosen_video.file)
         if orientation_err:

@@ -80,6 +80,17 @@ class Video(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Kutilmoqda'),
+            ('processing', 'Tayyorlanmoqda'),
+            ('ready', 'Tayyor'),
+            ('failed', 'Xatolik'),
+        ],
+        default='ready',
+    )
+    processing_error = models.TextField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']

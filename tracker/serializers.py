@@ -26,8 +26,8 @@ class VideoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Video
-        fields = ['id', 'title', 'file', 'video_url', 'is_default', 'owner', 'owner_name', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at', 'video_url']
+        fields = ['id', 'title', 'file', 'video_url', 'is_default', 'owner', 'owner_name', 'is_active', 'status', 'processing_error', 'created_at']
+        read_only_fields = ['id', 'created_at', 'video_url', 'status', 'processing_error']
 
     def get_video_url(self, obj):
         return obj.url

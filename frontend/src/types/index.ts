@@ -179,6 +179,8 @@ export interface VideoItem {
   owner: number | null;
   owner_name: string | null;
   is_active: boolean;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  processing_error?: string | null;
   created_at: string;
 }
 

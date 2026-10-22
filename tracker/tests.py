@@ -2872,6 +2872,269 @@ class ResumableUploadTestCase(TestCase):
         self.assertEqual(called_kwargs['headers']['file_size'], "19")
 
 
+class VideoAspectConversionTestCase(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='aspect_user', password='password123')
+        self.client.force_authenticate(user=self.user)
+        self.ig_user = InstagramUser.objects.create(
+            user=self.user,
+            name="Aspect User",
+            status='connected',
+            access_token='valid_token_aspect',
+            ig_user_id='ig_aspect_123'
+        )
+
+    def test_needs_aspect_ratio_conversion(self):
+        from .video_utils import needs_aspect_ratio_conversion
+        # 16:9 gorizontal videolar -> o'zgartirilishi kerak (True)
+        self.assertTrue(needs_aspect_ratio_conversion(1920, 1080))
+        self.assertTrue(needs_aspect_ratio_conversion(1276, 718))
+
+        # 9:16 vertikal videolar (0.5625) -> o'zgartirilmasligi kerak (False)
+        self.assertFalse(needs_aspect_ratio_conversion(1080, 1920))
+        self.assertFalse(needs_aspect_ratio_conversion(720, 1280))
+
+        # 1:1 kvadrat va 4:3 -> o'zgartirilishi kerak (True)
+        self.assertTrue(needs_aspect_ratio_conversion(1080, 1080))
+        self.assertTrue(needs_aspect_ratio_conversion(1440, 1080))
+
+        # 0 yoki manfiy o'lchamlar -> False
+        self.assertFalse(needs_aspect_ratio_conversion(0, 0))
+
+    def test_validate_video_duration(self):
+        from .video_utils import validate_video_duration
+        # 3 soniyadan kam -> xato
+        err_short = validate_video_duration(2.5)
+        self.assertIsNotNone(err_short)
+        self.assertIn("3 soniyadan kam", err_short)
+
+        # 90 soniyadan ko'p -> xato
+        err_long = validate_video_duration(95.0)
+        self.assertIsNotNone(err_long)
+        self.assertIn("90 soniyadan ko'p", err_long)
+
+        # 3 va 90 oralig'ida -> to'g'ri (None)
+        self.assertIsNone(validate_video_duration(3.0))
+        self.assertIsNone(validate_video_duration(15.5))
+        self.assertIsNone(validate_video_duration(90.0))
+
+    @patch('tracker.video_utils.subprocess.run')
+    @patch('tracker.video_utils.shutil.which')
+    def test_get_video_info_ffprobe(self, mock_which, mock_run):
+        from .video_utils import get_video_info
+        mock_which.return_value = '/usr/bin/ffprobe'
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps({
+            "streams": [
+                {"codec_type": "video", "width": 1276, "height": 718, "duration": "12.5"},
+                {"codec_type": "audio"}
+            ],
+            "format": {"duration": "12.5"}
+        })
+        mock_run.return_value = mock_proc
+
+        with patch('os.path.exists', return_value=True):
+            info = get_video_info('/tmp/fake.mp4')
+            self.assertEqual(info['width'], 1276)
+            self.assertEqual(info['height'], 718)
+            self.assertEqual(info['duration'], 12.5)
+            self.assertTrue(info['has_audio'])
+
+    @patch('tracker.video_utils.subprocess.run')
+    @patch('tracker.video_utils.shutil.which')
+    def test_convert_video_to_9_16_command(self, mock_which, mock_run):
+        from .video_utils import convert_video_to_9_16
+        mock_which.return_value = '/usr/bin/ffmpeg'
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_run.return_value = mock_proc
+
+        with patch('tracker.video_utils.get_video_info', return_value={'width': 1276, 'height': 718, 'has_audio': True}), \
+             patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=5000):
+            res = convert_video_to_9_16('/tmp/in.mp4', '/tmp/out.mp4')
+            self.assertTrue(res)
+
+            call_args = mock_run.call_args[0][0]
+            self.assertEqual(call_args[0], '/usr/bin/ffmpeg')
+            self.assertIn('-filter_complex', call_args)
+            idx_fc = call_args.index('-filter_complex')
+            filter_str = call_args[idx_fc + 1]
+            self.assertIn('scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5', filter_str)
+            self.assertIn('scale=1080:-2', filter_str)
+            self.assertIn('libx264', call_args)
+            self.assertIn('veryfast', call_args)
+            self.assertIn('+faststart', call_args)
+
+    @patch('tracker.tasks.process_video_file')
+    def test_process_video_task_success(self, mock_process_file):
+        from .tasks import process_video_task
+        mock_process_file.return_value = (True, None)
+
+        f = SimpleUploadedFile("horizontal.mp4", b"dummy_content", content_type="video/mp4")
+        video = Video.objects.create(title="Horizontal Video", file=f, owner=self.ig_user, status='pending')
+
+        result = process_video_task(video.id)
+        self.assertEqual(result['status'], 'ready')
+
+        video.refresh_from_db()
+        self.assertEqual(video.status, 'ready')
+        self.assertIsNone(video.processing_error)
+
+    @patch('tracker.video_utils.convert_video_to_9_16')
+    @patch('tracker.video_utils.get_video_info')
+    def test_process_video_task_horizontal_converts_to_vertical(self, mock_info, mock_convert):
+        from .tasks import process_video_task
+        mock_info.return_value = {
+            'width': 1276,
+            'height': 718,
+            'duration': 15.0,
+            'has_audio': True,
+        }
+
+        def fake_convert(input_p, output_p, timeout=180):
+            with open(output_p, 'wb') as out_f:
+                out_f.write(b'converted_vertical_content')
+            return True
+
+        mock_convert.side_effect = fake_convert
+
+        f = SimpleUploadedFile("horiz_video.mp4", b"original_content", content_type="video/mp4")
+        video = Video.objects.create(title="Horizontal Promo", file=f, owner=self.ig_user, status='pending')
+
+        result = process_video_task(video.id)
+        self.assertEqual(result['status'], 'ready')
+
+        video.refresh_from_db()
+        self.assertEqual(video.status, 'ready')
+        mock_convert.assert_called_once()
+
+    @patch('tracker.video_utils.convert_video_to_9_16')
+    @patch('tracker.video_utils.get_video_info')
+    def test_process_video_task_vertical_skipped(self, mock_info, mock_convert):
+        from .tasks import process_video_task
+        # 1080x1920 (9:16)
+        mock_info.return_value = {
+            'width': 1080,
+            'height': 1920,
+            'duration': 15.0,
+            'has_audio': True,
+        }
+
+        f = SimpleUploadedFile("vertical_video.mp4", b"vertical_content", content_type="video/mp4")
+        video = Video.objects.create(title="Vertical Promo", file=f, owner=self.ig_user, status='pending')
+
+        result = process_video_task(video.id)
+        self.assertEqual(result['status'], 'ready')
+
+        video.refresh_from_db()
+        self.assertEqual(video.status, 'ready')
+        mock_convert.assert_not_called()
+
+    @patch('tracker.video_utils.get_video_info')
+    def test_process_video_task_duration_less_than_3_seconds(self, mock_info):
+        from .tasks import process_video_task
+        mock_info.return_value = {
+            'width': 1080,
+            'height': 1920,
+            'duration': 2.0,
+            'has_audio': True,
+        }
+
+        f = SimpleUploadedFile("short_video.mp4", b"short_content", content_type="video/mp4")
+        video = Video.objects.create(title="Short Video", file=f, owner=self.ig_user, status='pending')
+
+        result = process_video_task(video.id)
+        self.assertEqual(result['status'], 'failed')
+
+        video.refresh_from_db()
+        self.assertEqual(video.status, 'failed')
+        self.assertIn("3 soniyadan kam", video.processing_error)
+
+    @patch('tracker.video_utils.get_video_info')
+    def test_process_video_task_duration_more_than_90_seconds(self, mock_info):
+        from .tasks import process_video_task
+        mock_info.return_value = {
+            'width': 1080,
+            'height': 1920,
+            'duration': 95.0,
+            'has_audio': True,
+        }
+
+        f = SimpleUploadedFile("long_video.mp4", b"long_content", content_type="video/mp4")
+        video = Video.objects.create(title="Long Video", file=f, owner=self.ig_user, status='pending')
+
+        result = process_video_task(video.id)
+        self.assertEqual(result['status'], 'failed')
+
+        video.refresh_from_db()
+        self.assertEqual(video.status, 'failed')
+        self.assertIn("90 soniyadan ko'p", video.processing_error)
+
+    @patch('tracker.tasks.process_video_task.delay')
+    def test_user_upload_video_endpoint_queues_task(self, mock_delay):
+        f = SimpleUploadedFile("user_reel.mp4", b"reel_content", content_type="video/mp4")
+        response = self.client.post('/api/user/upload-video/', {
+            'title': 'My Uploaded Reel',
+            'file': f,
+        }, format='multipart')
+
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data['status'], 'processing')
+        mock_delay.assert_called_once_with(data['id'])
+
+    def test_user_publish_video_blocked_while_processing(self):
+        f = SimpleUploadedFile("processing_vid.mp4", b"dummy", content_type="video/mp4")
+        Video.objects.create(
+            title="Processing Video",
+            file=f,
+            owner=self.ig_user,
+            is_active=True,
+            status='processing'
+        )
+
+        resp = self.client.post('/api/user/publish/')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("tayyorlanmoqda", resp.json().get('error', ''))
+
+    def test_user_publish_video_blocked_when_failed(self):
+        f = SimpleUploadedFile("failed_vid.mp4", b"dummy", content_type="video/mp4")
+        Video.objects.create(
+            title="Failed Video",
+            file=f,
+            owner=self.ig_user,
+            is_active=True,
+            status='failed',
+            processing_error="Video davomiyligi 3 soniyadan kam (amalda: 2.1 soniya)."
+        )
+
+        resp = self.client.post('/api/user/publish/')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("yaroqsiz", resp.json().get('error', ''))
+        self.assertIn("3 soniyadan kam", resp.json().get('error', ''))
+
+    def test_user_publish_status_shows_processing_reason(self):
+        f = SimpleUploadedFile("processing_vid.mp4", b"dummy", content_type="video/mp4")
+        Video.objects.create(
+            title="Processing Video",
+            file=f,
+            owner=self.ig_user,
+            is_active=True,
+            status='processing'
+        )
+
+        resp = self.client.get('/api/user/publish-status/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data['can_publish'])
+        self.assertIn("tayyorlanmoqda", data['can_publish_reason'])
+
+
+
 
 
 

@@ -145,6 +145,14 @@ class VideoViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'title', 'id']
     ordering = ['-created_at']
 
+    def perform_create(self, serializer):
+        video = serializer.save(status='processing')
+        try:
+            from .tasks import process_video_task
+            process_video_task.delay(video.id)
+        except Exception as exc:
+            logger.warning("process_video_task navbatga qo'yishda xatolik: %s", exc)
+
     def get_queryset(self):
         user = self.request.user
         if not user or not user.is_authenticated:
@@ -1060,6 +1068,17 @@ def user_publish_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    if chosen_video.status in ['pending', 'processing']:
+        return Response(
+            {"error": "Videongiz hozirda tayyorlanmoqda (formatlanmoqda). Iltimos, jarayon tugashini kuting."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if chosen_video.status == 'failed':
+        return Response(
+            {"error": f"Videongiz yaroqsiz: {chosen_video.processing_error or 'Xatolik yuz bergan'}. Iltimos, boshqa video yuklang."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     # Takroriy bosishdan himoya: faqat haqiqatan jarayondagi postlar (failed postlar bloklamaydi)
     active_post = Post.objects.filter(
         link__user=ig_user,
@@ -1108,6 +1127,8 @@ def user_publish_video(request):
 def user_upload_video(request):
     """
     Foydalanuvchi o'zining shaxsiy Reels videosini yuklaydi.
+    Video darhol 'processing' holatida saqlanadi va fon vazifasi (Celery)
+    davomiyligini tekshiradi hamda kerak bo'lsa 9:16 ga o'tkazadi.
     """
     ig_user, _ = InstagramUser.objects.get_or_create(
         user=request.user,
@@ -1120,7 +1141,13 @@ def user_upload_video(request):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    video = serializer.save(owner=ig_user, is_default=False, is_active=True)
+    video = serializer.save(owner=ig_user, is_default=False, is_active=True, status='processing')
+    try:
+        from .tasks import process_video_task
+        process_video_task.delay(video.id)
+    except Exception as exc:
+        logger.warning("process_video_task navbatga qo'yishda xatolik: %s", exc)
+
     return Response(VideoSerializer(video).data, status=status.HTTP_201_CREATED)
 
 
@@ -1163,6 +1190,12 @@ def user_publish_status(request):
         if not has_video:
             base_response["can_publish"] = False
             base_response["can_publish_reason"] = "Joylash uchun video mavjud emas. Iltimos, video yuklang."
+        elif chosen_video.status in ['pending', 'processing']:
+            base_response["can_publish"] = False
+            base_response["can_publish_reason"] = "Video tayyorlanmoqda (formatlanmoqda)..."
+        elif chosen_video.status == 'failed':
+            base_response["can_publish"] = False
+            base_response["can_publish_reason"] = f"Video yaroqsiz: {chosen_video.processing_error or 'Xatolik yuz bergan'}"
         else:
             base_response["can_publish"] = True
         return Response(UserPublishStatusOutputSerializer(base_response).data)
@@ -1184,6 +1217,12 @@ def user_publish_status(request):
             if not has_video:
                 can_publish = False
                 can_publish_reason = "Joylash uchun video mavjud emas. Iltimos, video yuklang."
+            elif chosen_video.status in ['pending', 'processing']:
+                can_publish = False
+                can_publish_reason = "Video tayyorlanmoqda (formatlanmoqda)..."
+            elif chosen_video.status == 'failed':
+                can_publish = False
+                can_publish_reason = f"Video yaroqsiz: {chosen_video.processing_error or 'Xatolik yuz bergan'}"
             else:
                 can_publish = True
         else:
@@ -1191,6 +1230,12 @@ def user_publish_status(request):
     elif not has_video:
         can_publish = False
         can_publish_reason = "Joylash uchun video mavjud emas. Iltimos, video yuklang."
+    elif chosen_video.status in ['pending', 'processing']:
+        can_publish = False
+        can_publish_reason = "Video tayyorlanmoqda (formatlanmoqda)..."
+    elif chosen_video.status == 'failed':
+        can_publish = False
+        can_publish_reason = f"Video yaroqsiz: {chosen_video.processing_error or 'Xatolik yuz bergan'}"
     else:
         can_publish = True
 

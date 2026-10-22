@@ -17,6 +17,7 @@ from .services import (
     InstagramRateLimitError,
     InstagramNetworkError,
 )
+from .video_utils import process_video_file
 
 logger = logging.getLogger(__name__)
 
@@ -164,3 +165,46 @@ def refresh_expiring_tokens_task():
 
     logger.info("Tokenlarni yangilash yakunlandi: muvaffaqiyatli=%d, xato=%d", refreshed_count, failed_count)
     return {"refreshed_count": refreshed_count, "failed_count": failed_count}
+
+
+@shared_task(bind=True, max_retries=1, default_retry_delay=10)
+def process_video_task(self, video_id: int):
+    """
+    Celery vazifasi: Yuklangan videoni tekshiradi va kerak bo'lsa 9:16 formatga o'tkazadi.
+    1. Davomiylikni tekshiradi (3 - 90 soniya).
+    2. Nisbat 9:16 bo'lmasa, ffmpeg yordamida blur-fonli 1080x1920 MP4 ga o'tkazadi.
+    3. Natijaga ko'ra Video.status ('ready' yoki 'failed') ni yangilaydi.
+    """
+    logger.info("Video konvertatsiya vazifasi boshlandi: video_id=%s", video_id)
+    try:
+        from .models import Video
+        video = Video.objects.get(id=video_id)
+    except Video.DoesNotExist:
+        logger.warning("Video topilmadi: video_id=%s", video_id)
+        return {"error": f"Video #{video_id} topilmadi"}
+
+    video.status = 'processing'
+    video.processing_error = None
+    video.save(update_fields=['status', 'processing_error'])
+
+    try:
+        success, error_msg = process_video_file(video)
+        if success:
+            video.status = 'ready'
+            video.processing_error = None
+            video.save(update_fields=['status', 'processing_error'])
+            logger.info("Video tayyor holatga keltirildi: video_id=%s", video_id)
+            return {"status": "ready", "video_id": video_id}
+        else:
+            video.status = 'failed'
+            video.processing_error = error_msg
+            video.save(update_fields=['status', 'processing_error'])
+            logger.error("Video tayyorlashda xatolik: video_id=%s, xato=%s", video_id, error_msg)
+            return {"status": "failed", "error": error_msg}
+    except Exception as exc:
+        logger.exception("Kutilmagan xatolik videoni qayta ishlashda: video_id=%s", video_id)
+        video.status = 'failed'
+        video.processing_error = f"Kutilmagan xatolik: {exc}"
+        video.save(update_fields=['status', 'processing_error'])
+        return {"status": "failed", "error": str(exc)}
+
