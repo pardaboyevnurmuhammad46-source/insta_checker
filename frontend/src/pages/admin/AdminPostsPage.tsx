@@ -16,6 +16,7 @@ import {
   MessageCircle,
   Search,
   Film,
+  Trash2,
 } from 'lucide-react';
 
 export const AdminPostsPage: React.FC = () => {
@@ -85,6 +86,19 @@ export const AdminPostsPage: React.FC = () => {
       showToast(err.detail || 'Qayta urinishda xatolik', 'error');
     } finally {
       setRetryingId(null);
+    }
+  };
+
+  const handleDeletePost = async (postId: number) => {
+    if (!window.confirm("Haqiqatan ham ushbu postni o'chirmoqchimisiz?")) {
+      return;
+    }
+    try {
+      await apiClient.delete(`/api/user/posts/${postId}/`);
+      showToast("Post o'chirildi", 'success');
+      fetchPosts();
+    } catch {
+      showToast("Postni o'chirishda xatolik yuz berdi", 'error');
     }
   };
 
@@ -381,7 +395,11 @@ export const AdminPostsPage: React.FC = () => {
                       {post.last_synced_at ? `Yangilandi: ${formatTimeAgo(post.last_synced_at)}` : '—'}
                     </td>
                     <td className="py-3.5 px-4">
-                      {post.permalink ? (
+                      {post.status === 'deleted' ? (
+                        <span className="text-[11px] text-rose-400 font-medium">
+                          Instagramda o'chirilgan
+                        </span>
+                      ) : post.permalink ? (
                         <a
                           href={post.permalink}
                           target="_blank"
@@ -400,7 +418,7 @@ export const AdminPostsPage: React.FC = () => {
                         <button
                           onClick={() => handleCheckMetrics(post.id)}
                           disabled={checkingMetricsId === post.id}
-                          className="px-2.5 py-1 rounded-lg bg-indigo-950/60 text-indigo-400 border border-indigo-800 hover:bg-indigo-900 text-xs transition inline-flex items-center gap-1 disabled:opacity-50"
+                          className="px-2 py-1 rounded-lg bg-indigo-950/60 text-indigo-400 border border-indigo-800 hover:bg-indigo-900 text-xs transition inline-flex items-center gap-1 disabled:opacity-50"
                           title="Hozir tekshirish"
                         >
                           <RefreshCw
@@ -413,7 +431,7 @@ export const AdminPostsPage: React.FC = () => {
                           <button
                             onClick={() => handleRetry(post.id)}
                             disabled={retryingId === post.id}
-                            className="px-2.5 py-1 rounded-lg bg-amber-950/60 text-amber-400 border border-amber-800 hover:bg-amber-900 text-xs transition inline-flex items-center gap-1 disabled:opacity-50"
+                            className="px-2 py-1 rounded-lg bg-amber-950/60 text-amber-400 border border-amber-800 hover:bg-amber-900 text-xs transition inline-flex items-center gap-1 disabled:opacity-50"
                             title="Qayta joylash"
                           >
                             <RotateCcw
@@ -423,6 +441,13 @@ export const AdminPostsPage: React.FC = () => {
                             <span>Qayta joylash</span>
                           </button>
                         )}
+                        <button
+                          onClick={() => handleDeletePost(post.id)}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                          title="Tarixdan o'chirish"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     </td>
                   </tr>

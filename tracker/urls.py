@@ -42,6 +42,7 @@ from .views import (
     me_notifications_read,
     me_prizes,
     user_posts_list,
+    user_delete_post,
     admin_campaign_posts_list,
     user_sync_media,
 )
@@ -81,6 +82,7 @@ urlpatterns = [
     path('api/user/retry/', user_retry_publish, name='user_retry_publish'),
     path('api/user/upload-video/', user_upload_video, name='user_upload_video'),
     path('api/user/posts/', user_posts_list, name='user_posts_list'),
+    path('api/user/posts/<int:post_id>/', user_delete_post, name='user_delete_post'),
     path('api/user/sync/', user_sync_media, name='user_sync_media'),
 
     # Admin endpoints

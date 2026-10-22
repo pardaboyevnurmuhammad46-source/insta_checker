@@ -3812,6 +3812,24 @@ class CampaignPostsApiTestCase(TestCase):
         resp4 = self.client.post('/api/user/sync/')
         self.assertEqual(resp4.status_code, 429)
 
+    def test_user_delete_post_success_and_forbidden_other_user(self):
+        # 1. User A o'z postini o'chiradi
+        self.client.force_authenticate(user=self.user_a)
+        resp = self.client.delete(f'/api/user/posts/{self.post_a.id}/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Post.objects.filter(id=self.post_a.id).exists())
+
+        # 2. User A boshqa user B ning postini o'chirishga urinadi -> 404
+        resp_forbidden = self.client.delete(f'/api/user/posts/{self.post_b.id}/')
+        self.assertEqual(resp_forbidden.status_code, 404)
+        self.assertTrue(Post.objects.filter(id=self.post_b.id).exists())
+
+        # 3. Admin istalgan postni o'chira oladi
+        self.client.force_authenticate(user=self.admin_user)
+        resp_admin = self.client.delete(f'/api/user/posts/{self.post_b.id}/')
+        self.assertEqual(resp_admin.status_code, 200)
+        self.assertFalse(Post.objects.filter(id=self.post_b.id).exists())
+
 
 
 

@@ -1087,7 +1087,7 @@ def user_publish_video(request):
         status__in=['queued', 'publishing']
     ).first()
     if active_post:
-        ref_time = active_post.posted_at or active_post.link.created_at
+        ref_time = active_post.last_checked_at or active_post.posted_at
         if ref_time and (timezone.now() - ref_time) > timedelta(minutes=10):
             active_post.status = 'failed'
             active_post.error = "Jarayon vaqti tugadi (timeout). Qayta urinib ko'ring."
@@ -1112,7 +1112,8 @@ def user_publish_video(request):
     post, _ = Post.objects.get_or_create(link=link)
     post.status = 'queued'
     post.error = None
-    post.save(update_fields=['status', 'error'])
+    post.last_checked_at = timezone.now()
+    post.save(update_fields=['status', 'error', 'last_checked_at'])
 
     publish_reels_task.delay(link.id)
 
@@ -1221,7 +1222,7 @@ def user_publish_status(request):
     can_publish_reason = None
     
     if post.status in ['queued', 'publishing']:
-        ref_time = post.posted_at or post.link.created_at
+        ref_time = post.last_checked_at or post.posted_at
         if ref_time and (timezone.now() - ref_time) > timedelta(minutes=10):
             post.status = 'failed'
             post.error = "Jarayon vaqti tugadi (timeout). Qayta urinib ko'ring."
@@ -1297,7 +1298,8 @@ def user_retry_publish(request):
     post.retry_count += 1
     post.status = 'queued'
     post.error = None
-    post.save(update_fields=['status', 'error', 'retry_count'])
+    post.last_checked_at = timezone.now()
+    post.save(update_fields=['status', 'error', 'retry_count', 'last_checked_at'])
 
     publish_reels_task.delay(post.link.id)
 
@@ -1615,6 +1617,25 @@ def user_posts_list(request):
     page = paginator.paginate_queryset(qs, request)
     serializer = CampaignPostSerializer(page, many=True)
     return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def user_delete_post(request, post_id: int):
+    """
+    Foydalanuvchi o'z postini va uning statistika tarixini o'chiradi (admin istalgan postni o'chira oladi).
+    """
+    user = request.user
+    if user.is_staff or user.is_superuser:
+        post = get_object_or_404(Post, id=post_id)
+    else:
+        ig_user = getattr(user, 'instagram_user', None)
+        if not ig_user:
+            return Response({"error": "Post topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+        post = get_object_or_404(Post, id=post_id, link__user=ig_user)
+
+    post.delete()
+    return Response({"status": "deleted", "message": f"Post #{post_id} muvaffaqiyatli o'chirildi"}, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])

@@ -19,6 +19,7 @@ import {
   FileVideo,
   Info,
   Copy,
+  Trash2,
 } from 'lucide-react';
 
 export const UserVideoPage: React.FC = () => {
@@ -96,6 +97,20 @@ export const UserVideoPage: React.FC = () => {
     }
     navigator.clipboard.writeText(captionText);
     showToast('Caption nusxalandi!', 'success');
+  };
+
+  const handleDeletePost = async (postId: number) => {
+    if (!window.confirm("Haqiqatan ham ushbu postni tarixdan o'chirmoqchimisiz?")) {
+      return;
+    }
+    try {
+      await apiClient.delete(`/api/user/posts/${postId}/`);
+      showToast("Post tarixdan o'chirildi", 'success');
+      fetchUserPosts();
+      fetchData();
+    } catch {
+      showToast("Postni o'chirishda xatolik yuz berdi", 'error');
+    }
   };
 
   // Timer while publishing is running
@@ -859,7 +874,8 @@ export const UserVideoPage: React.FC = () => {
                   <th className="py-3 px-3">Izohlar</th>
                   <th className="py-3 px-3">Joylandi</th>
                   <th className="py-3 px-3">Sinxronizatsiya</th>
-                  <th className="py-3 px-3 text-right">Havola</th>
+                  <th className="py-3 px-3">Havola</th>
+                  <th className="py-3 px-3 text-right">Amallar</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-normal">
@@ -894,6 +910,10 @@ export const UserVideoPage: React.FC = () => {
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-950 text-rose-400 border border-rose-800">
                           Rad etilgan
                         </span>
+                      ) : p.status === 'deleted' ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-950 text-rose-400 border border-rose-800">
+                          O'chirilgan
+                        </span>
                       ) : (
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-300">
                           {p.status}
@@ -926,8 +946,12 @@ export const UserVideoPage: React.FC = () => {
                     <td className="py-3 px-3 text-slate-400 text-[11px]">
                       {p.last_synced_at ? `Yangilandi: ${formatTimeAgo(p.last_synced_at)}` : '—'}
                     </td>
-                    <td className="py-3 px-3 text-right">
-                      {p.permalink ? (
+                    <td className="py-3 px-3">
+                      {p.status === 'deleted' ? (
+                        <span className="text-[11px] text-rose-400 font-medium" title="Ushbu video Instagramda o'chirilgan">
+                          Instagramda o'chirilgan
+                        </span>
+                      ) : p.permalink ? (
                         <a
                           href={p.permalink}
                           target="_blank"
@@ -939,6 +963,17 @@ export const UserVideoPage: React.FC = () => {
                       ) : (
                         <span className="text-slate-600">—</span>
                       )}
+                    </td>
+                    <td className="py-3 px-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePost(p.id)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition text-xs"
+                        title="Postni tarixdan o'chirish"
+                      >
+                        <Trash2 size={13} />
+                        <span className="hidden sm:inline">O'chirish</span>
+                      </button>
                     </td>
                   </tr>
                 ))}

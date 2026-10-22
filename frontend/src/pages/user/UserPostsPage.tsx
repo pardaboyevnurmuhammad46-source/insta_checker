@@ -12,6 +12,7 @@ import {
   X,
   RefreshCw,
   Film,
+  Trash2,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -77,6 +78,18 @@ export const UserPostsPage: React.FC = () => {
       // ignore
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handleDeletePost = async (postId: number) => {
+    if (!window.confirm("Haqiqatan ham ushbu postni tarixdan o'chirmoqchimisiz?")) {
+      return;
+    }
+    try {
+      await apiClient.delete(`/api/user/posts/${postId}/`);
+      fetchPosts(page);
+    } catch {
+      // ignore
     }
   };
 
@@ -227,7 +240,11 @@ export const UserPostsPage: React.FC = () => {
                       {post.last_synced_at ? `Yangilandi: ${formatTimeAgo(post.last_synced_at)}` : '—'}
                     </td>
                     <td className="py-3 px-4">
-                      {post.permalink ? (
+                      {post.status === 'deleted' ? (
+                        <span className="text-[11px] text-rose-400 font-medium">
+                          Instagramda o'chirilgan
+                        </span>
+                      ) : post.permalink ? (
                         <a
                           href={post.permalink}
                           target="_blank"
@@ -242,13 +259,22 @@ export const UserPostsPage: React.FC = () => {
                       )}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => handleOpenHistory(post)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-950/60 text-indigo-400 border border-indigo-800 hover:bg-indigo-900 text-xs transition"
-                      >
-                        <ChartIcon size={12} />
-                        <span>Grafik</span>
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleOpenHistory(post)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-950/60 text-indigo-400 border border-indigo-800 hover:bg-indigo-900 text-xs transition"
+                        >
+                          <ChartIcon size={12} />
+                          <span>Grafik</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeletePost(post.id)}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                          title="Tarixdan o'chirish"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
