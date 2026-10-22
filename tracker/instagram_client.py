@@ -145,7 +145,6 @@ class RealInstagramClient(InstagramClient):
             'response_type': 'code',
             'scope': getattr(settings, 'INSTAGRAM_SCOPE', 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights,instagram_business_manage_comments'),
             'state': str(state),
-            'force_reauth': 'true',
         }
         return f"{base_url}?{urllib.parse.urlencode(params)}"
 
