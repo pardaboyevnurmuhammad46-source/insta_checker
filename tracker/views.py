@@ -1,5 +1,7 @@
+import os
 import logging
 import csv
+import requests
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
@@ -1025,6 +1027,8 @@ def admin_reset_password(request):
 def user_connect_instagram(request):
     """
     Foydalanuvchi o'z kabinetidan Instagramga ulanish oqimini boshlaydi.
+    POST orqali to'g'ridan-to'g'ri (tizimdagi yoki yuborilgan token orqali) ulanishi mumkin,
+    GET orqali esa OAuth auth_url qaytaradi.
     """
     ig_user, _ = InstagramUser.objects.get_or_create(
         user=request.user,
@@ -1040,11 +1044,73 @@ def user_connect_instagram(request):
         link.video = chosen_video
         link.save(update_fields=['video'])
 
+    # POST so'rovida to'g'ridan-to'g'ri bog'lash
+    if request.method == 'POST':
+        if ig_user.status == 'connected' and ig_user.access_token:
+            return Response({
+                "status": "connected",
+                "message": "Instagram hisobi allaqachon ulangan.",
+                "username": ig_user.name,
+                "ig_user_id": ig_user.ig_user_id,
+            })
+
+        custom_token = request.data.get('access_token') if hasattr(request, 'data') else None
+        token = custom_token or os.environ.get('INSTAGRAM_ACCESS_TOKEN') or getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '')
+
+        if token:
+            try:
+                # Mock rejim tekshiruvi
+                if getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False):
+                    ig_user.ig_user_id = 'dry_run_user_9999'
+                    ig_user.name = ig_user.name or request.user.username
+                    ig_user.access_token = token
+                    ig_user.status = 'connected'
+                    ig_user.token_expires_at = timezone.now() + timedelta(days=60)
+                    ig_user.save()
+                    return Response({
+                        "status": "connected",
+                        "message": "Instagram hisobi muvaffaqiyatli ulandi (Simulyatsiya)!",
+                        "username": ig_user.name,
+                        "ig_user_id": ig_user.ig_user_id,
+                    })
+
+                # Real rejim: Graph API orqali tekshirish
+                url = "https://graph.instagram.com/me"
+                params = {'fields': 'user_id,username,account_type', 'access_token': token}
+                res = requests.get(url, params=params, timeout=12)
+                if res.status_code == 200:
+                    data = res.json()
+                    ig_user.ig_user_id = str(data.get('user_id') or data.get('id') or '')
+                    ig_user.name = data.get('username') or ig_user.name
+                    ig_user.access_token = token
+                    ig_user.status = 'connected'
+                    ig_user.token_expires_at = timezone.now() + timedelta(days=60)
+                    ig_user.save()
+                    return Response({
+                        "status": "connected",
+                        "message": f"Instagram hisobi (@{ig_user.name}) muvaffaqiyatli ulandi!",
+                        "username": ig_user.name,
+                        "ig_user_id": ig_user.ig_user_id,
+                    })
+                elif custom_token:
+                    return Response(
+                        {"error": "Instagram tokenni qabul qilmadi. Iltimos, qayta urinib ko'ring."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except Exception as exc:
+                logger.error("Instagram bevosita ulashda xatolik: %s", str(exc))
+                if custom_token:
+                    return Response(
+                        {"error": f"Instagram bilan bog'lanishda xatolik: {str(exc)}"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
     auth_url = build_instagram_auth_url(str(link.token))
     return Response({
         "auth_url": auth_url,
         "link_token": str(link.token),
         "status": ig_user.status,
+        "has_system_token": bool(getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '') or os.environ.get('INSTAGRAM_ACCESS_TOKEN', ''))
     })
 
 

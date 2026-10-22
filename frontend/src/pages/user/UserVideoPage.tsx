@@ -210,12 +210,29 @@ export const UserVideoPage: React.FC = () => {
   const handleConnectInstagram = async () => {
     try {
       setConnecting(true);
-      const res = await apiClient.get('/api/user/connect-instagram/');
+      // 1. Tizimdagi tasdiqlangan Instagram tokeni orqali to'g'ridan-to'g'ri ulash
+      const res = await apiClient.post('/api/user/connect-instagram/');
+      if (res.data.status === 'connected') {
+        showToast(res.data.message || 'Instagram akkauntingiz muvaffaqiyatli ulandi!', 'success');
+        await refreshProfile();
+        return;
+      }
+      // 2. Agar to'g'ridan-to'g'ri ulanmasa, OAuth URL ga o'tish
       if (res.data.auth_url) {
         window.location.href = res.data.auth_url;
       }
     } catch (err: any) {
-      showToast(err.detail || 'Ulanish manzilini olib boʻlmadi', 'error');
+      try {
+        const getRes = await apiClient.get('/api/user/connect-instagram/');
+        if (getRes.data.status === 'connected') {
+          showToast('Instagram akkaunti ulangan!', 'success');
+          await refreshProfile();
+        } else if (getRes.data.auth_url) {
+          window.location.href = getRes.data.auth_url;
+        }
+      } catch (getErr: any) {
+        showToast(err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
+      }
     } finally {
       setConnecting(false);
     }

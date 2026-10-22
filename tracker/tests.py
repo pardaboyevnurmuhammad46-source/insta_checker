@@ -1326,6 +1326,28 @@ class Phase4UserInstagramAndPublishTestCase(TestCase):
         self.assertIn("link_token", data)
         self.assertIn("instagram.com/oauth/authorize", data['auth_url'])
 
+    @patch('tracker.views.requests.get')
+    def test_user_connect_instagram_post_direct(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "user_id": "178419999",
+            "username": "direct_connected_user",
+            "account_type": "MEDIA_CREATOR"
+        }
+        mock_get.return_value = mock_resp
+
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/user/connect-instagram/", {"access_token": "direct_token_xyz"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['status'], 'connected')
+        self.assertEqual(data['username'], 'direct_connected_user')
+
+        self.ig_user1.refresh_from_db()
+        self.assertEqual(self.ig_user1.status, 'connected')
+        self.assertEqual(self.ig_user1.access_token, 'direct_token_xyz')
+
     @patch('tracker.views.publish_reels_task.delay')
     def test_user_publish_video_and_duplicate_prevention(self, mock_delay):
         self.client.force_authenticate(user=self.user1)
@@ -2534,6 +2556,42 @@ class CheckInstagramCommandTestCase(TestCase):
 
         self.assertIn("Tarmoq xatoligi", err.getvalue())
         self.assertNotIn("secret_token_net", err.getvalue())
+
+
+class ConnectInstagramCommandTestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="command_test_user", password="Password123!")
+        self.ig_user = InstagramUser.objects.create(
+            user=self.user,
+            name="Command Test User",
+            status="pending"
+        )
+
+    @patch('tracker.management.commands.connect_instagram.verify_token_permissions')
+    @patch('tracker.management.commands.connect_instagram.requests.get')
+    def test_connect_instagram_success(self, mock_get, mock_perms):
+        from io import StringIO
+        from django.core.management import call_command
+
+        mock_perms.return_value = (True, [])
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "user_id": "17841499999999",
+            "username": "command_ig_user",
+            "account_type": "MEDIA_CREATOR",
+        }
+        mock_get.return_value = mock_resp
+
+        out = StringIO()
+        call_command('connect_instagram', 'command_test_user', '--token', 'test_token_val', stdout=out)
+
+        self.ig_user.refresh_from_db()
+        self.assertEqual(self.ig_user.status, 'connected')
+        self.assertEqual(self.ig_user.ig_user_id, '17841499999999')
+        self.assertEqual(self.ig_user.access_token, 'test_token_val')
+        self.assertIn("@command_ig_user", out.getvalue())
+        self.assertIn("CONNECTED", out.getvalue())
 
 
 class TokenEncryptionAndSecurityTestCase(TestCase):
