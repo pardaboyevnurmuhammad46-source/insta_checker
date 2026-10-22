@@ -263,6 +263,11 @@ if INSTAGRAM_MODE not in ('real', 'mock'):
 INSTAGRAM_DRY_RUN = (INSTAGRAM_MODE == 'mock')
 DRY_RUN_PUBLISH_DELAY_SECONDS = float(os.getenv('DRY_RUN_PUBLISH_DELAY_SECONDS', '2.0'))
 
+# Instagram Reels yuklash usuli: "resumable" (Meta serveriga to'g'ridan-to'g'ri stream) yoki "url" (zaxira fallback)
+INSTAGRAM_UPLOAD_MODE = os.getenv('INSTAGRAM_UPLOAD_MODE', 'resumable').lower()
+if INSTAGRAM_UPLOAD_MODE not in ('resumable', 'url'):
+    INSTAGRAM_UPLOAD_MODE = 'resumable'
+
 SPECTACULAR_SETTINGS = {
     'TITLE': 'InstaChecker API',
     'DESCRIPTION': 'Instagram Reels Tracker & Prize System API',

@@ -1060,11 +1060,19 @@ def user_publish_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Takroriy bosishdan himoya
+    # Takroriy bosishdan himoya: faqat haqiqatan jarayondagi postlar (failed postlar bloklamaydi)
     active_post = Post.objects.filter(
         link__user=ig_user,
         status__in=['queued', 'publishing']
     ).first()
+    if active_post:
+        ref_time = active_post.posted_at or active_post.link.created_at
+        if ref_time and (timezone.now() - ref_time) > timedelta(minutes=10):
+            active_post.status = 'failed'
+            active_post.error = "Jarayon vaqti tugadi (timeout). Qayta urinib ko'ring."
+            active_post.save(update_fields=['status', 'error'])
+            active_post = None
+
     if active_post:
         return Response({
             "error": "Videoni joylash allaqachon jarayonda. Iltimos, jarayon yakunlanishini kuting.",
@@ -1166,7 +1174,20 @@ def user_publish_status(request):
     can_publish_reason = None
     
     if post.status in ['queued', 'publishing']:
-        can_publish_reason = "Jarayonda bo'lgan post mavjud."
+        ref_time = post.posted_at or post.link.created_at
+        if ref_time and (timezone.now() - ref_time) > timedelta(minutes=10):
+            post.status = 'failed'
+            post.error = "Jarayon vaqti tugadi (timeout). Qayta urinib ko'ring."
+            post.save(update_fields=['status', 'error'])
+            retries_left = max(0, 3 - post.retry_count)
+            can_retry = retries_left > 0
+            if not has_video:
+                can_publish = False
+                can_publish_reason = "Joylash uchun video mavjud emas. Iltimos, video yuklang."
+            else:
+                can_publish = True
+        else:
+            can_publish_reason = "Jarayonda bo'lgan post mavjud."
     elif not has_video:
         can_publish = False
         can_publish_reason = "Joylash uchun video mavjud emas. Iltimos, video yuklang."

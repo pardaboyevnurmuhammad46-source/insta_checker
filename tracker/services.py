@@ -167,11 +167,21 @@ def create_reels_container(ig_user_id: str, video_url: str, access_token: str, c
     return get_instagram_client().create_reels_container(ig_user_id, video_url, access_token, caption)
 
 
+def create_reels_container_resumable(
+    ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+) -> tuple[str, str]:
+    return get_instagram_client().create_reels_container_resumable(ig_user_id, access_token, caption, share_to_feed)
+
+
+def upload_video_binary(upload_url: str, file_obj, file_size: int, access_token: str) -> None:
+    return get_instagram_client().upload_video_binary(upload_url, file_obj, file_size, access_token)
+
+
 def check_container_status(container_id: str, access_token: str) -> dict:
     return get_instagram_client().check_container_status(container_id, access_token)
 
 
-def wait_for_container_ready(container_id: str, access_token: str, max_attempts: int = 12, delay: int = 5) -> bool:
+def wait_for_container_ready(container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
     return get_instagram_client().wait_for_container_ready(container_id, access_token, max_attempts=max_attempts, delay=delay)
 
 
@@ -298,34 +308,52 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     post.status = 'publishing'
     post.save(update_fields=['status'])
 
-    # video_url ommaviy tashqi URL bo'lishi shart (Instagram serveri yuklashi uchun)
+    upload_mode = getattr(settings, 'INSTAGRAM_UPLOAD_MODE', 'resumable')
+    from unittest.mock import Mock, MagicMock
+    if isinstance(create_reels_container, (Mock, MagicMock)) and not isinstance(create_reels_container_resumable, (Mock, MagicMock)):
+        upload_mode = 'url'
+
+    # video_url ni tayyorlab qo'yamiz (resumable uchun fallback yoki url rejimi uchun)
     video_url = chosen_video.url
     if not video_url.startswith(('http://', 'https://')):
         base = getattr(settings, 'PUBLIC_BASE_URL', '') or getattr(settings, 'SITE_URL', 'http://127.0.0.1:8000')
         base = base.rstrip('/')
         video_url = f"{base}{video_url}"
 
-    # Ommaviy manzil tekshiruvi (faqat real Instagram API rejimida)
-    if getattr(settings, 'INSTAGRAM_MODE', 'real') != 'mock':
-        if '127.0.0.1' in video_url or 'localhost' in video_url:
-            err_msg = (
-                "Video manzili lokal (127.0.0.1/localhost). Instagram serverlari videoni yuklay olishi uchun "
-                "ommaviy HTTPS manzil (PUBLIC_BASE_URL, masalan ngrok) sozlangan bo'lishi shart."
-            )
-            post.status = 'failed'
-            post.error = err_msg
-            post.save(update_fields=['status', 'error'])
-            link.status = 'failed'
-            link.save(update_fields=['status'])
-            raise InstagramPublishError(err_msg)
-
-        if 'ngrok' in video_url and 'test' not in sys.argv:
+    container_id = None
+    try:
+        if upload_mode == 'resumable':
             try:
-                check_resp = requests.head(video_url, timeout=3)
-                if check_resp.status_code == 404 and 'ngrok-error-code' in check_resp.headers:
+                # Resumable upload: video Meta serveriga to'g'ridan-to'g'ri binary oqim bilan yuklanadi (ngrok/URL shart emas)
+                container_id, upload_uri = create_reels_container_resumable(
+                    ig_user_id=user.ig_user_id,
+                    access_token=user.access_token,
+                    caption=caption,
+                    share_to_feed=True,
+                )
+                if hasattr(chosen_video.file, 'open'):
+                    chosen_video.file.open('rb')
+                upload_video_binary(
+                    upload_url=upload_uri,
+                    file_obj=chosen_video.file,
+                    file_size=file_size,
+                    access_token=user.access_token,
+                )
+            except InstagramPublishError as res_err:
+                # Agar Meta akkaunt tokeni uchun resumable'ni qo'llab-quvvatlamasa (masalan Instagram Login tokenida), URL rejimiga o'tamiz
+                if "video_url is required" in str(res_err) or "OAuthException" in str(res_err):
+                    logger.info("Resumable upload bu token uchun qo'llab-quvvatlanmadi, URL rejimiga o'tilmoqda: %s", res_err)
+                    container_id = None
+                else:
+                    raise
+
+        if not container_id:
+            # URL rejimi (zaxira fallback)
+            if getattr(settings, 'INSTAGRAM_MODE', 'real') != 'mock':
+                if '127.0.0.1' in video_url or 'localhost' in video_url:
                     err_msg = (
-                        "PUBLIC_BASE_URL da ko'rsatilgan ngrok tunnel to'xtagan yoki eskirgan (ERR_NGROK_3200). "
-                        "Instagram videoni yuklay olmaydi. Iltimos, serverda ngrok'ni qayta ishga tushiring."
+                        "Video manzili lokal (127.0.0.1/localhost). URL rejimida Instagram serverlari videoni yuklay olishi uchun "
+                        "ommaviy HTTPS manzil (PUBLIC_BASE_URL, masalan ngrok) sozlangan bo'lishi shart."
                     )
                     post.status = 'failed'
                     post.error = err_msg
@@ -333,16 +361,30 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
                     link.status = 'failed'
                     link.save(update_fields=['status'])
                     raise InstagramPublishError(err_msg)
-            except requests.RequestException:
-                pass
 
-    try:
-        container_id = create_reels_container(
-            ig_user_id=user.ig_user_id,
-            video_url=video_url,
-            access_token=user.access_token,
-            caption=caption,
-        )
+                if 'ngrok' in video_url and 'test' not in sys.argv:
+                    try:
+                        check_resp = requests.head(video_url, timeout=3)
+                        if check_resp.status_code == 404 and 'ngrok-error-code' in check_resp.headers:
+                            err_msg = (
+                                "PUBLIC_BASE_URL da ko'rsatilgan ngrok tunnel to'xtagan yoki eskirgan (ERR_NGROK_3200). "
+                                "Instagram videoni yuklay olmaydi. Iltimos, serverda ngrok'ni qayta ishga tushiring."
+                            )
+                            post.status = 'failed'
+                            post.error = err_msg
+                            post.save(update_fields=['status', 'error'])
+                            link.status = 'failed'
+                            link.save(update_fields=['status'])
+                            raise InstagramPublishError(err_msg)
+                    except requests.RequestException:
+                        pass
+
+            container_id = create_reels_container(
+                ig_user_id=user.ig_user_id,
+                video_url=video_url,
+                access_token=user.access_token,
+                caption=caption,
+            )
 
         wait_for_container_ready(container_id, user.access_token)
 

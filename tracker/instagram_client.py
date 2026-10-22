@@ -72,7 +72,21 @@ class InstagramClient(ABC):
 
     @abstractmethod
     def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
-        """Reels media container yaratadi va container ID qaytaradi."""
+        """Reels media container yaratadi va container ID qaytaradi (URL usuli)."""
+        pass
+
+    @abstractmethod
+    def create_reels_container_resumable(
+        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+    ) -> tuple[str, str]:
+        """Resumable upload uchun container yaratadi va (container_id, upload_uri) qaytaradi."""
+        pass
+
+    @abstractmethod
+    def upload_video_binary(
+        self, upload_url: str, file_obj, file_size: int, access_token: str
+    ) -> None:
+        """Video binary oqimini Meta rupload serveriga yuklaydi."""
         pass
 
     @abstractmethod
@@ -81,8 +95,8 @@ class InstagramClient(ABC):
         pass
 
     @abstractmethod
-    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 12, delay: int = 5) -> bool:
-        """Container yuklanishi tugashini kutadi."""
+    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
+        """Container yuklanishi tugashini kutadi (har 2 soniyada tekshiradi)."""
         pass
 
     @abstractmethod
@@ -240,6 +254,50 @@ class RealInstagramClient(InstagramClient):
             raise InstagramPublishError("Container ID olinmadi.")
         return str(container_id)
 
+    def create_reels_container_resumable(
+        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+    ) -> tuple[str, str]:
+        url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media"
+        payload = {
+            'media_type': 'REELS',
+            'upload_type': 'resumable',
+            'caption': caption,
+            'share_to_feed': 'true' if share_to_feed else 'false',
+            'access_token': access_token,
+        }
+        try:
+            response = self._requests.post(url, data=payload, timeout=30)
+        except requests.RequestException as exc:
+            raise InstagramPublishNetworkError(f"Resumable container yaratishda tarmoq xatoligi: {exc}") from exc
+
+        if response.status_code != 200:
+            raise InstagramPublishError(f"Resumable container yaratib bo'lmadi: {response.text}")
+
+        data = response.json()
+        container_id = data.get('id')
+        if not container_id:
+            raise InstagramPublishError("Container ID olinmadi.")
+        upload_uri = data.get('uri') or f"https://rupload.facebook.com/ig-api-upload/v21.0/{container_id}"
+        return str(container_id), str(upload_uri)
+
+    def upload_video_binary(
+        self, upload_url: str, file_obj, file_size: int, access_token: str
+    ) -> None:
+        headers = {
+            'Authorization': f'OAuth {access_token}',
+            'offset': '0',
+            'file_size': str(file_size),
+        }
+        try:
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+            response = self._requests.post(upload_url, data=file_obj, headers=headers, timeout=120)
+        except requests.RequestException as exc:
+            raise InstagramPublishNetworkError(f"Videoni Meta serveriga yuklashda tarmoq xatoligi: {exc}") from exc
+
+        if response.status_code not in (200, 201):
+            raise InstagramPublishError(f"Video binary yuklanmadi ({response.status_code}): {response.text}")
+
     def check_container_status(self, container_id: str, access_token: str) -> dict:
         url = f"https://graph.instagram.com/v21.0/{container_id}"
         params = {
@@ -256,7 +314,7 @@ class RealInstagramClient(InstagramClient):
 
         return response.json()
 
-    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 12, delay: int = 5) -> bool:
+    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
         for _ in range(max_attempts):
             status_data = self.check_container_status(container_id, access_token)
             status_code = status_data.get('status_code')
@@ -266,14 +324,14 @@ class RealInstagramClient(InstagramClient):
                 err_hint = (
                     f"Reels yuklash xatoligi: {status_data}. "
                     "Mumkin bo'lgan sabablar: "
-                    "1) Video Reels talablariga mos emas (vertikal 9:16 emas, masalan gorizontal 16:9); "
-                    "2) Video havolasi (PUBLIC_BASE_URL/ngrok) tashqi tarmoqdan yuklab bo'lmaydi yoki ngrok to'xtagan; "
+                    "1) Video Reels talablariga mos emas (vertikal 9:16 emas, masalan gorizontal 16:9 yoki davomiyligi 3-90 soniya oralig'ida emas); "
+                    "2) Video yuklash jarayonida xatolik yuz berdi; "
                     "3) Akkauntning kunlik Reels joylash limiti (25-50 ta) tugagan."
                 )
                 raise InstagramPublishError(err_hint)
             time.sleep(delay)
 
-        raise InstagramPublishNetworkError("Reels videosini qayta ishlash vaqti tugadi (timeout).")
+        raise InstagramPublishNetworkError(f"Reels videosini qayta ishlash vaqti tugadi (maksimal {max_attempts * delay} soniya kutildi).")
 
     def publish_container(self, ig_user_id: str, container_id: str, access_token: str) -> str:
         url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media_publish"
@@ -451,13 +509,24 @@ class DryRunInstagramClient(InstagramClient):
         container_id = f"dry_run_container_{uuid.uuid4().hex[:10]}"
         return container_id
 
+    def create_reels_container_resumable(
+        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+    ) -> tuple[str, str]:
+        container_id = f"dry_run_container_{uuid.uuid4().hex[:10]}"
+        return container_id, f"https://rupload.facebook.com/ig-api-upload/v21.0/{container_id}"
+
+    def upload_video_binary(
+        self, upload_url: str, file_obj, file_size: int, access_token: str
+    ) -> None:
+        return
+
     def check_container_status(self, container_id: str, access_token: str) -> dict:
         return {
             "status_code": "FINISHED",
             "id": container_id,
         }
 
-    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 12, delay: int = 5) -> bool:
+    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
         # Pollingni tekshirish uchun ixtiyoriy sun'iy kechikish
         sim_delay = getattr(settings, 'DRY_RUN_PUBLISH_DELAY_SECONDS', 2.0)
         if sim_delay and sim_delay > 0:

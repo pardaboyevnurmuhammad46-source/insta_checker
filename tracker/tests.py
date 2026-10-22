@@ -2791,6 +2791,87 @@ class Phase7EnhancementsTestCase(TestCase):
         mock_update.assert_called_once_with(post)
 
 
+class ResumableUploadTestCase(TestCase):
+    def setUp(self):
+        self.user = InstagramUser.objects.create(
+            name="Resumable User",
+            ig_user_id="ig_resumable_123",
+            access_token="secret_token_resumable",
+            status="connected",
+        )
+        dummy_video = SimpleUploadedFile("test_resumable.mp4", b"dummy_mp4_bytes", content_type="video/mp4")
+        self.link = UniqueLink.objects.create(user=self.user, video=dummy_video)
+
+    @patch('tracker.services.get_media_permalink')
+    @patch('tracker.services.publish_container')
+    @patch('tracker.services.wait_for_container_ready')
+    @patch('tracker.services.upload_video_binary')
+    @patch('tracker.services.create_reels_container_resumable')
+    def test_resumable_upload_flow_success(
+        self, mock_create_resumable, mock_upload_binary, mock_wait, mock_publish, mock_permalink
+    ):
+        mock_create_resumable.return_value = ("resumable_container_123", "https://rupload.facebook.com/ig-api-upload/v21.0/resumable_container_123")
+        mock_wait.return_value = True
+        mock_publish.return_value = "resumable_media_999"
+        mock_permalink.return_value = "https://instagram.com/reel/resumable999/"
+
+        post = publish_reels_for_link(self.link.id, caption="Resumable Caption")
+
+        mock_create_resumable.assert_called_once_with(
+            ig_user_id="ig_resumable_123",
+            access_token="secret_token_resumable",
+            caption="Resumable Caption",
+            share_to_feed=True,
+        )
+        mock_upload_binary.assert_called_once()
+        mock_wait.assert_called_once_with("resumable_container_123", "secret_token_resumable")
+        mock_publish.assert_called_once_with("ig_resumable_123", "resumable_container_123", "secret_token_resumable")
+        self.assertEqual(post.status, 'published')
+        self.assertEqual(post.ig_media_id, 'resumable_media_999')
+
+    @patch('tracker.services.requests.post')
+    def test_real_client_resumable_methods_with_requests_mock(self, mock_post):
+        from tracker.instagram_client import RealInstagramClient
+        client = RealInstagramClient()
+
+        # 1. create_reels_container_resumable
+        mock_resp_container = MagicMock()
+        mock_resp_container.status_code = 200
+        mock_resp_container.json.return_value = {
+            "id": "cont_456",
+            "uri": "https://rupload.facebook.com/ig-api-upload/v21.0/cont_456"
+        }
+        mock_post.return_value = mock_resp_container
+
+        container_id, upload_uri = client.create_reels_container_resumable(
+            ig_user_id="17841",
+            access_token="token_xyz",
+            caption="Test caption",
+            share_to_feed=True
+        )
+        self.assertEqual(container_id, "cont_456")
+        self.assertEqual(upload_uri, "https://rupload.facebook.com/ig-api-upload/v21.0/cont_456")
+
+        # 2. upload_video_binary
+        mock_resp_upload = MagicMock()
+        mock_resp_upload.status_code = 200
+        mock_post.return_value = mock_resp_upload
+
+        import io
+        dummy_stream = io.BytesIO(b"binary_video_stream")
+        client.upload_video_binary(
+            upload_url=upload_uri,
+            file_obj=dummy_stream,
+            file_size=19,
+            access_token="token_xyz"
+        )
+        # Verify OAuth header and offset
+        called_args, called_kwargs = mock_post.call_args
+        self.assertEqual(called_kwargs['headers']['Authorization'], "OAuth token_xyz")
+        self.assertEqual(called_kwargs['headers']['offset'], "0")
+        self.assertEqual(called_kwargs['headers']['file_size'], "19")
+
+
 
 
 
