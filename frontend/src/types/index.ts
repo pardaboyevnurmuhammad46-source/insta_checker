@@ -197,6 +197,12 @@ export interface CampaignPost {
   last_synced_at: string | null;
   username: string;
   code: string;
+  ai_verified?: boolean;
+  ai_confidence?: number;
+  ai_detection_source?: 'both' | 'audio' | 'caption' | 'none' | null;
+  transcript?: string | null;
+  ai_explanation?: string | null;
+  points_awarded?: number;
 }
 
 export interface PublishStatus {
@@ -219,4 +225,22 @@ export interface PublishStatus {
     max_size_mb: number;
     allowed_types: string[];
   };
+  ai_verified?: boolean;
+  ai_confidence?: number;
+  ai_detection_source?: 'both' | 'audio' | 'caption' | 'none' | null;
+  transcript?: string | null;
+  ai_explanation?: string | null;
+  points_awarded?: number;
+  last_checked_at?: string | null;
+  next_check_at?: string | null;
+}
+
+export interface CampaignConfig {
+  id: number;
+  topic: string;
+  brand_name: string;
+  required_keywords: string;
+  ai_prompt_instructions: string;
+  points_reward: number;
+  updated_at: string;
 }

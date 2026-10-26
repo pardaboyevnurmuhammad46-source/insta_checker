@@ -12,7 +12,7 @@ from django.db import IntegrityError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from django.contrib.admin.sites import AdminSite
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APITestCase
 
 # from tracker.models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 from tracker.models import (
@@ -1325,6 +1325,31 @@ class Phase4UserInstagramAndPublishTestCase(TestCase):
         self.assertIn("auth_url", data)
         self.assertIn("link_token", data)
         self.assertIn("instagram.com/oauth/authorize", data['auth_url'])
+
+    def test_instagram_auth_url_public(self):
+        # Avtorizatsiyadan o'tmagan mijoz ham auth_url olishi mumkin
+        resp = self.client.get("/api/auth/instagram/url/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("auth_url", data)
+        self.assertIn("link_token", data)
+        self.assertIn("instagram.com/oauth/authorize", data['auth_url'])
+
+    @patch('tracker.views.publish_reels_task.delay')
+    @patch('tracker.views.complete_instagram_oauth')
+    def test_callback_registers_new_user_with_jwt(self, mock_complete, mock_task_delay):
+        temp_ig = InstagramUser.objects.create(name="new_ig_celebrity", status="pending")
+        temp_link = UniqueLink.objects.create(user=temp_ig, video=self.default_video)
+
+        mock_complete.return_value = (temp_ig, temp_link)
+        resp = self.client.get(f"/oauth/callback/?code=secret_code&state={temp_link.token}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Muvaffaqiyatli Ulandi!", resp.content.decode())
+        self.assertIn("app/video", resp.content.decode())
+
+        temp_ig.refresh_from_db()
+        self.assertIsNotNone(temp_ig.user)
+        self.assertEqual(temp_ig.user.username, "new_ig_celebrity")
 
     @patch('tracker.views.requests.get')
     def test_user_connect_instagram_post_direct(self, mock_get):
@@ -3808,7 +3833,9 @@ class CampaignPostsApiTestCase(TestCase):
         expected_fields = {
             'id', 'thumbnail_url', 'permalink', 'status', 'source',
             'views', 'likes', 'comments_count', 'posted_at',
-            'last_synced_at', 'username', 'code'
+            'last_synced_at', 'username', 'code',
+            'ai_verified', 'ai_confidence', 'ai_detection_source',
+            'transcript', 'ai_explanation', 'points_awarded',
         }
         self.assertEqual(set(user_post_data.keys()), expected_fields)
         self.assertEqual(set(admin_post_a.keys()), expected_fields)
@@ -3887,6 +3914,75 @@ class CampaignPostsApiTestCase(TestCase):
         resp_admin = self.client.delete(f'/api/user/posts/{self.post_b.id}/')
         self.assertEqual(resp_admin.status_code, 200)
         self.assertFalse(Post.objects.filter(id=self.post_b.id).exists())
+
+
+class AIVerificationTestCase(APITestCase):
+    def setUp(self):
+        self.user = InstagramUser.objects.create(name="AI Test User", status="connected")
+        self.link = UniqueLink.objects.create(user=self.user, code="WIN999")
+        self.post = Post.objects.create(link=self.link, status="published", caption="Homiy aksiyasi: #WIN999 bilan qatnashing!")
+
+    def test_verify_video_advertisement_caption(self):
+        from .ai_verifier import verify_video_advertisement
+        result = verify_video_advertisement(
+            caption="Homiy aksiyasi: #WIN999 bilan qatnashing!",
+            expected_code="WIN999",
+        )
+        self.assertTrue(result['is_verified'])
+        self.assertEqual(result['detection_source'], 'caption')
+        self.assertGreater(result['points'], 0)
+
+    def test_verify_video_advertisement_negative(self):
+        from .ai_verifier import verify_video_advertisement
+        result = verify_video_advertisement(
+            caption="Bugun ob-havo juda yaxshi, do'stlar bilan aylanyapmiz.",
+            expected_code="WIN999",
+        )
+        self.assertFalse(result['is_verified'])
+        self.assertEqual(result['detection_source'], 'none')
+        self.assertEqual(result['points'], 0)
+
+    def test_process_and_verify_post_ai(self):
+        from .ai_verifier import process_and_verify_post_ai
+        process_and_verify_post_ai(self.post)
+        self.post.refresh_from_db()
+        self.assertTrue(self.post.ai_verified)
+        self.assertGreater(self.post.points_awarded, 0)
+        self.assertTrue(Notification.objects.filter(user=self.user, kind='ai_verified').exists())
+
+    def test_celery_beat_5_minute_schedule(self):
+        schedule = settings.CELERY_BEAT_SCHEDULE
+        self.assertEqual(schedule['check-all-due-posts-metrics']['schedule'], 300.0)
+        self.assertEqual(schedule['sync-recent-active-users-media']['schedule'], 300.0)
+
+    def test_admin_campaign_config_api(self):
+        admin = User.objects.create_superuser(username="admin_ai", password="123")
+        self.client.force_authenticate(user=admin)
+
+        # 1. GET
+        get_res = self.client.get('/api/admin/campaign-config/')
+        self.assertEqual(get_res.status_code, 200)
+        self.assertIn('topic', get_res.json())
+
+        # 2. PUT / PATCH
+        patch_res = self.client.patch('/api/admin/campaign-config/', {
+            'topic': 'Yangi Yil Aksiya Tanlovi',
+            'required_keywords': 'yangi yil, chegirma, aksiya',
+            'points_reward': 150,
+        })
+        self.assertEqual(patch_res.status_code, 200)
+        self.assertEqual(patch_res.json()['topic'], 'Yangi Yil Aksiya Tanlovi')
+        self.assertEqual(patch_res.json()['points_reward'], 150)
+
+    def test_admin_reverify_post_ai_api(self):
+        admin = User.objects.create_superuser(username="admin_ai2", password="123")
+        self.client.force_authenticate(user=admin)
+
+        res = self.client.post(f'/api/admin/posts/{self.post.id}/re-verify-ai/')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()['ai_verified'])
+        self.assertGreater(res.json()['points_awarded'], 0)
+
 
 
 

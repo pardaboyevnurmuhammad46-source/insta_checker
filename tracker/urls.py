@@ -43,8 +43,12 @@ from .views import (
     me_prizes,
     user_posts_list,
     user_delete_post,
+    privacy_policy,
     admin_campaign_posts_list,
     user_sync_media,
+    instagram_auth_url,
+    admin_campaign_config,
+    admin_reverify_post_ai,
 )
 
 from .dev_views import (
@@ -67,6 +71,7 @@ router.register(r'data-deletions', DataDeletionRequestViewSet)
 
 urlpatterns = [
     # User endpoints
+    path('api/auth/instagram/url/', instagram_auth_url, name='instagram_auth_url'),
     path('api/register/', register_user, name='register_user'),
     path('api/auth/register/', register_user, name='auth_register'),
     path('api/me/', current_user_profile, name='current_user_profile'),
@@ -91,6 +96,8 @@ urlpatterns = [
     path('api/admin/users/<int:user_id>/', admin_user_detail, name='admin_user_detail'),
     path('api/admin/posts/', admin_posts_list, name='admin_posts_list'),
     path('api/admin/campaign-posts/', admin_campaign_posts_list, name='admin_campaign_posts_list'),
+    path('api/admin/campaign-config/', admin_campaign_config, name='admin_campaign_config'),
+    path('api/admin/posts/<int:post_id>/re-verify-ai/', admin_reverify_post_ai, name='admin_reverify_post_ai'),
     path('api/admin/stats/daily/', admin_stats_daily, name='admin_stats_daily'),
     path('api/admin/export/posts.csv', admin_export_posts_csv, name='admin_export_posts_csv'),
     path('api/admin/create-user/', admin_create_user, name='admin_create_user'),
@@ -110,7 +117,10 @@ urlpatterns = [
     path('link/<uuid:token>/', redirect_to_instagram, name='user_redirect'),
     path('my-post/<uuid:token>/', user_portal, name='user_portal'),
     path('oauth/callback/', instagram_callback, name='instagram_callback'),
+    path('oauth/callback', instagram_callback, name='instagram_callback_no_slash'),
     path('oauth/deauthorize/', instagram_deauthorize, name='instagram_deauthorize'),
     path('oauth/data-deletion/', instagram_data_deletion, name='instagram_data_deletion'),
     path('oauth/data-deletion/status/<str:confirmation_code>/', data_deletion_status, name='data_deletion_status'),
+    path('privacy-policy/', privacy_policy, name='privacy_policy'),
+    path('oauth/privacy-policy/', privacy_policy, name='privacy_policy_oauth'),
 ]

@@ -1,45 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../api/client';
-import type { CampaignPost, PostStat, PaginatedResponse } from '../../types';
+import type { CampaignPost, PaginatedResponse } from '../../types';
 import { formatNumber, formatDate, formatTimeAgo } from '../../utils/format';
 import { Pagination } from '../../components/Pagination';
-import {
-  Eye,
-  Heart,
-  MessageCircle,
-  ExternalLink,
-  LineChart as ChartIcon,
-  X,
-  RefreshCw,
-  Film,
-  Trash2,
-} from 'lucide-react';
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts';
+import { Eye, Heart, MessageCircle, ExternalLink, Search, Filter, Trash2, Film, RefreshCw } from 'lucide-react';
 
 export const UserPostsPage: React.FC = () => {
   const [posts, setPosts] = useState<CampaignPost[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  
+  // Filters
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'deleted'>('published');
 
-  // History modal
-  const [selectedPost, setSelectedPost] = useState<CampaignPost | null>(null);
-  const [historyStats, setHistoryStats] = useState<PostStat[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-
-  const fetchPosts = async (pageNumber: number) => {
+  const fetchPosts = async () => {
     try {
       setLoading(true);
+      // Constructing query string based on filters
+      const statusParam = statusFilter !== 'all' ? `&status=${statusFilter}` : '';
+      const searchParam = search ? `&search=${search}` : '';
+      
       const res = await apiClient.get<PaginatedResponse<CampaignPost>>(
-        `/api/user/posts/?page=${pageNumber}`
+        `/api/user/posts/?page=${page}${statusParam}${searchParam}`
       );
       setPosts(res.data.results || []);
       setTotalCount(res.data.count || 0);
@@ -50,324 +34,143 @@ export const UserPostsPage: React.FC = () => {
     }
   };
 
+  // Debounced fetch for search
   useEffect(() => {
-    fetchPosts(page);
+    const timer = setTimeout(() => {
+      setPage(1);
+      fetchPosts();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search, statusFilter]);
+
+  useEffect(() => {
+    fetchPosts();
   }, [page]);
 
-  const handleOpenHistory = async (post: CampaignPost) => {
-    setSelectedPost(post);
-    setLoadingHistory(true);
-    try {
-      const res = await apiClient.get<PostStat[]>(`/api/me/posts/${post.id}/history/`);
-      setHistoryStats(res.data || []);
-    } catch {
-      setHistoryStats([]);
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
-  const handleRefreshHistory = async () => {
-    if (!selectedPost) return;
-    setLoadingHistory(true);
-    try {
-      const res = await apiClient.get<PostStat[]>(`/api/me/posts/${selectedPost.id}/history/`);
-      setHistoryStats(res.data || []);
-      fetchPosts(page);
-    } catch {
-      // ignore
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
   const handleDeletePost = async (postId: number) => {
-    if (!window.confirm("Haqiqatan ham ushbu postni tarixdan o'chirmoqchimisiz?")) {
-      return;
-    }
+    if (!window.confirm("Haqiqatan ham ushbu postni o'chirmoqchimisiz? Tarix tozalanadi.")) return;
     try {
       await apiClient.delete(`/api/user/posts/${postId}/`);
-      fetchPosts(page);
-    } catch {
-      // ignore
-    }
-  };
-
-  const getStatusBadge = (post: CampaignPost) => {
-    switch (post.status) {
-      case 'verified':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800">
-            Tasdiqlangan
-          </span>
-        );
-      case 'revoked':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-800">
-            Bekor qilingan
-          </span>
-        );
-      case 'rejected':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800">
-            Rad etilgan
-          </span>
-        );
-      case 'published':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-950 text-blue-400 border border-blue-800">
-            Joylandi
-          </span>
-        );
-      case 'queued':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-800">
-            Navbatda
-          </span>
-        );
-      case 'failed':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950 text-rose-300 border border-rose-900">
-            Xatolik
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400">
-            {post.status}
-          </span>
-        );
-    }
+      fetchPosts();
+    } catch {}
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-          Mening Postlarim
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Instagram akkauntingizga joylangan barcha videolar va ularning statistikasi
-        </p>
-      </div>
-
-      <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-900/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-              <tr>
-                <th className="py-3.5 px-4">Video</th>
-                <th className="py-3.5 px-4">Kod</th>
-                <th className="py-3.5 px-4">Holati</th>
-                <th className="py-3.5 px-4">Manba</th>
-                <th className="py-3.5 px-4">Ko'rishlar</th>
-                <th className="py-3.5 px-4">Like</th>
-                <th className="py-3.5 px-4">Izoh</th>
-                <th className="py-3.5 px-4">Joylandi</th>
-                <th className="py-3.5 px-4">Sinxronizatsiya</th>
-                <th className="py-3.5 px-4">Havola</th>
-                <th className="py-3.5 px-4 text-right">Tarix</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {loading && (
-                <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500 text-sm">
-                    Yuklanmoqda...
-                  </td>
-                </tr>
-              )}
-              {!loading && posts.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500 text-sm">
-                    Hozircha postlar mavjud emas.
-                  </td>
-                </tr>
-              )}
-              {!loading &&
-                posts.map((post) => (
-                  <tr key={post.id} className="hover:bg-slate-900/40 transition">
-                    <td className="py-3 px-4">
-                      {post.thumbnail_url ? (
-                        <img
-                          src={post.thumbnail_url}
-                          alt="Thumbnail"
-                          className="w-10 h-14 object-cover rounded-md border border-slate-700"
-                        />
-                      ) : (
-                        <div className="w-10 h-14 bg-slate-800 rounded-md border border-slate-700 flex items-center justify-center">
-                          <Film size={16} className="text-slate-500" />
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 font-mono font-semibold text-amber-400">
-                      {post.code || '—'}
-                    </td>
-                    <td className="py-3 px-4">{getStatusBadge(post)}</td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded ${
-                          post.source === 'site'
-                            ? 'bg-indigo-950 text-indigo-300 border border-indigo-800'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        {post.source === 'site' ? 'Sayt' : "O'zim"}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-white">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Eye size={14} className="text-sky-400" />
-                        {formatNumber(post.views)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-slate-400">
-                        <Heart size={14} className="text-rose-400" />
-                        {formatNumber(post.likes)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-slate-400">
-                        <MessageCircle size={14} className="text-emerald-400" />
-                        {formatNumber(post.comments_count)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-400">
-                      {formatDate(post.posted_at)}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-400">
-                      {post.last_synced_at ? `Yangilandi: ${formatTimeAgo(post.last_synced_at)}` : '—'}
-                    </td>
-                    <td className="py-3 px-4">
-                      {post.status === 'deleted' ? (
-                        <span className="text-[11px] text-rose-400 font-medium">
-                          Instagramda o'chirilgan
-                        </span>
-                      ) : post.permalink ? (
-                        <a
-                          href={post.permalink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-pink-400 hover:text-pink-300 inline-flex items-center gap-1 text-xs"
-                        >
-                          <span>Instagram</span>
-                          <ExternalLink size={12} />
-                        </a>
-                      ) : (
-                        <span className="text-slate-600">—</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="inline-flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleOpenHistory(post)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-950/60 text-indigo-400 border border-indigo-800 hover:bg-indigo-900 text-xs transition"
-                        >
-                          <ChartIcon size={12} />
-                          <span>Grafik</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeletePost(post.id)}
-                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
-                          title="Tarixdan o'chirish"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            Mening Postlarim
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">Barcha Reels videolaringiz va ko'rsatkichlari</p>
         </div>
-
-        <Pagination
-          currentPage={page}
-          totalCount={totalCount}
-          onPageChange={(p) => setPage(p)}
-        />
+        <button onClick={fetchPosts} className="p-2 bg-slate-800 text-slate-300 rounded-lg hover:text-white transition w-fit">
+           <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+        </button>
       </div>
 
-      {/* History Modal */}
-      {selectedPost && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-white text-base">
-                    Post #{selectedPost.id} Ko'rishlar Tarixi
-                  </h3>
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
-                    Har 5 daqiqada yangilanadi
+      {/* Filters Bar */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col md:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input 
+            type="text" 
+            placeholder="Kod yoki izoh bo'yicha qidirish..." 
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:border-indigo-500 outline-none transition"
+          />
+        </div>
+        <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 w-full md:w-auto">
+          {['published', 'deleted', 'all'].map(s => (
+             <button 
+               key={s}
+               onClick={() => setStatusFilter(s as any)}
+               className={`flex-1 md:px-4 py-1.5 rounded-md text-xs font-semibold capitalize transition ${statusFilter === s ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+             >
+               {s === 'published' ? 'Faol' : s === 'deleted' ? "O'chirilgan" : 'Barchasi'}
+             </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Mobile Cards / Desktop Grid */}
+      {loading && posts.length === 0 ? (
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
+            {[1,2,3].map(i => <div key={i} className="h-40 bg-slate-900 rounded-xl border border-slate-800" />)}
+         </div>
+      ) : posts.length === 0 ? (
+        <div className="py-16 bg-slate-900 border border-slate-800 rounded-2xl text-center">
+          <Film size={40} className="mx-auto text-slate-600 mb-3" />
+          <p className="text-slate-300 font-medium">Postlar topilmadi</p>
+          <p className="text-slate-500 text-sm mt-1">Boshqa filtr tanlab ko'ring yoki yangi video joylang.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {posts.map(post => (
+            <div key={post.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col group hover:border-slate-700 transition">
+              {/* Card Header & Thumbnail */}
+              <div className="h-32 bg-slate-800 relative overflow-hidden">
+                {post.thumbnail_url ? (
+                  <img src={post.thumbnail_url} alt="Cover" className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition duration-500" />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-600 bg-slate-900/50">
+                    <Film size={24} className="mb-1" />
+                    <span className="text-[10px] uppercase font-bold tracking-widest">Reels</span>
+                  </div>
+                )}
+                {/* Overlay gradient */}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-transparent"></div>
+                
+                <div className="absolute top-2 right-2 flex gap-1">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${post.status === 'deleted' ? 'bg-rose-500/80 text-white' : 'bg-emerald-500/80 text-white'}`}>
+                    {post.status === 'deleted' ? "O'chirilgan" : 'Faol'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Vaqt boʻyicha oʻsish grafigi ({historyStats.length} ta yozuv)
-                </p>
+                
+                <div className="absolute bottom-2 left-3 right-3 flex justify-between items-end">
+                   <span className="font-mono text-amber-400 font-bold bg-slate-950/80 px-2 py-0.5 rounded border border-slate-700 text-xs">
+                     {post.code || '#NOCODE'}
+                   </span>
+                   {post.permalink && (
+                     <a href={post.permalink} target="_blank" rel="noreferrer" className="w-7 h-7 bg-white/10 hover:bg-white/20 backdrop-blur rounded-full flex items-center justify-center text-white transition">
+                       <ExternalLink size={12} />
+                     </a>
+                   )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleRefreshHistory}
-                  disabled={loadingHistory}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700 transition disabled:opacity-50"
-                  title="Qayta tekshirish va yangilash"
-                >
-                  <RefreshCw size={15} className={loadingHistory ? 'animate-spin' : ''} />
-                </button>
-                <button
-                  onClick={() => setSelectedPost(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
 
-            <div className="p-6">
-              {loadingHistory ? (
-                <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
-                  Tarix yuklanmoqda...
+              {/* Card Body - Stats */}
+              <div className="p-4 flex-1 flex flex-col justify-between space-y-4">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-slate-950 rounded-lg p-2 text-center border border-slate-800">
+                     <Eye size={14} className="mx-auto text-sky-400 mb-1" />
+                     <span className="block text-white font-bold text-sm">{formatNumber(post.views)}</span>
+                  </div>
+                  <div className="bg-slate-950 rounded-lg p-2 text-center border border-slate-800">
+                     <Heart size={14} className="mx-auto text-rose-400 mb-1" />
+                     <span className="block text-slate-300 font-bold text-sm">{formatNumber(post.likes)}</span>
+                  </div>
+                  <div className="bg-slate-950 rounded-lg p-2 text-center border border-slate-800">
+                     <MessageCircle size={14} className="mx-auto text-emerald-400 mb-1" />
+                     <span className="block text-slate-300 font-bold text-sm">{formatNumber(post.comments_count)}</span>
+                  </div>
                 </div>
-              ) : historyStats.length === 0 ? (
-                <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
-                  Ushbu post uchun hali tekshiruv statistikasi yozilmagan.
+
+                <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-800">
+                  <span className="text-slate-500">{formatDate(post.posted_at)}</span>
+                  <button onClick={() => handleDeletePost(post.id)} className="text-slate-500 hover:text-rose-400 flex items-center gap-1 transition">
+                    <Trash2 size={12} /> O'chirish
+                  </button>
                 </div>
-              ) : (
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={historyStats.map((s) => ({
-                        time: new Date(s.checked_at).toLocaleTimeString('uz-UZ', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }),
-                        views: s.views,
-                        likes: s.likes,
-                      }))}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="time" stroke="#94a3b8" fontSize={11} />
-                      <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(val) => formatNumber(val)} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', color: '#fff' }}
-                        formatter={(val: any) => [formatNumber(val), 'Koʻrishlar']}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="views"
-                        stroke="#6366f1"
-                        strokeWidth={2.5}
-                        dot={{ r: 3, fill: '#818cf8' }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
+      )}
+
+      {totalCount > posts.length && (
+        <Pagination currentPage={page} totalCount={totalCount} onPageChange={(p) => setPage(p)} />
       )}
     </div>
   );

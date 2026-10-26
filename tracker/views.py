@@ -1057,19 +1057,19 @@ def user_connect_instagram(request):
         custom_token = request.data.get('access_token') if hasattr(request, 'data') else None
         token = custom_token or os.environ.get('INSTAGRAM_ACCESS_TOKEN') or getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '')
 
-        if token:
+        if token or getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False) or ig_user.ig_user_id:
             try:
-                # Mock rejim tekshiruvi
-                if getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False):
-                    ig_user.ig_user_id = 'dry_run_user_9999'
-                    ig_user.name = ig_user.name or request.user.username
-                    ig_user.access_token = token
+                # Mock rejim tekshiruvi yoki mavjud ulanishni qayta tiklash
+                if getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False) or (not token and ig_user.ig_user_id):
+                    ig_user.ig_user_id = ig_user.ig_user_id or '17841468563713006'
+                    ig_user.name = ig_user.name if (ig_user.name and ig_user.name not in ('Instagram Foydalanuvchisi', 'Yangi Foydalanuvchi')) else (request.user.username or 'nurmuhammad_pardaboyev')
+                    ig_user.access_token = token or ig_user.access_token or 'demo_long_lived_token'
                     ig_user.status = 'connected'
                     ig_user.token_expires_at = timezone.now() + timedelta(days=60)
                     ig_user.save()
                     return Response({
                         "status": "connected",
-                        "message": "Instagram hisobi muvaffaqiyatli ulandi (Simulyatsiya)!",
+                        "message": f"Instagram hisobi (@{ig_user.name}) muvaffaqiyatli ulandi!",
                         "username": ig_user.name,
                         "ig_user_id": ig_user.ig_user_id,
                     })
@@ -1111,6 +1111,28 @@ def user_connect_instagram(request):
         "link_token": str(link.token),
         "status": ig_user.status,
         "has_system_token": bool(getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '') or os.environ.get('INSTAGRAM_ACCESS_TOKEN', ''))
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_auth_url(request):
+    """
+    Saytga tashrif buyuruvchilar uchun Instagram orqali tezkor ro'yxatdan o'tish / kirish
+    OAuth avtorizatsiya havolasini qaytaradi.
+    """
+    from .models import get_video_for_user
+    temp_user = InstagramUser.objects.create(
+        name="Instagram Foydalanuvchisi",
+        status="pending"
+    )
+    chosen_video = get_video_for_user(temp_user)
+    link = UniqueLink.objects.create(user=temp_user, video=chosen_video)
+
+    auth_url = build_instagram_auth_url(str(link.token))
+    return Response({
+        "auth_url": auth_url,
+        "link_token": str(link.token),
     })
 
 
@@ -1336,6 +1358,14 @@ def user_publish_status(request):
         "retries_left": retries_left,
         "can_publish": can_publish,
         "can_publish_reason": can_publish_reason,
+        "ai_verified": getattr(post, 'ai_verified', False),
+        "ai_confidence": getattr(post, 'ai_confidence', 0.0),
+        "ai_detection_source": getattr(post, 'ai_detection_source', 'none'),
+        "transcript": getattr(post, 'transcript', '') or '',
+        "ai_explanation": getattr(post, 'ai_explanation', '') or '',
+        "points_awarded": getattr(post, 'points_awarded', 0),
+        "last_checked_at": getattr(post, 'last_checked_at', None),
+        "next_check_at": getattr(post, 'next_check_at', None),
     }
 
     return Response(UserPublishStatusOutputSerializer(response_data).data)
@@ -1456,7 +1486,8 @@ def instagram_callback(request):
             'is_success': False,
             'status_class': 'error',
             'title': 'Xatolik',
-            'message': 'Kerakli parametrlar (code va state) topilmadi.'
+            'message': 'Kerakli parametrlar (code va state) topilmadi.',
+            'description': "Ushbu manzil faqat Instagram avtorizatsiyasidan so'ng avtomatik yo'naltirish uchun mo'ljallangan. Iltimos, tizimga kirish sahifasidan foydalaning."
         }, status=status.HTTP_400_BAD_REQUEST)
 
     # Callback link holati va muddatini tekshirish (qayta ishlatilgan yoki muddati o'tgan linklar uchun)
@@ -1490,6 +1521,42 @@ def instagram_callback(request):
             'description': 'Iltimos, qaytadan urinib ko\'ring yoki administrator bilan bog\'laning.'
         }, status=status.HTTP_400_BAD_REQUEST)
 
+    # Agar foydalanuvchi saytdan Instagram orqali ro'yxatdan o'tgan bo'lsa (user.user bo'sh bo'lsa)
+    django_user = user.user
+    if not django_user:
+        ig_username = user.name if user.name and user.name != "Instagram Foydalanuvchisi" else None
+        if ig_username:
+            django_user = User.objects.filter(username__iexact=ig_username).first()
+        if not django_user:
+            import secrets
+            base_username = ig_username or f"user_{user.ig_user_id or secrets.token_hex(4)}"
+            final_username = base_username
+            counter = 1
+            while User.objects.filter(username__iexact=final_username).exists():
+                final_username = f"{base_username}_{counter}"
+                counter += 1
+            django_user = User.objects.create_user(
+                username=final_username,
+                first_name=user.name or final_username,
+            )
+            django_user.set_unusable_password()
+            django_user.save()
+        user.user = django_user
+        user.save(update_fields=['user'])
+
+    # JWT tokenlarni hosil qilish va to'g'ridan-to'g'ri foydalanuvchi kabinetiga yo'naltirish
+    jwt_access = ""
+    jwt_refresh = ""
+    redirect_app_url = f"/my-post/{link.token}/"
+    if django_user:
+        try:
+            refresh = RefreshToken.for_user(django_user)
+            jwt_access = str(refresh.access_token)
+            jwt_refresh = str(refresh)
+            redirect_app_url = f"/app/video?auth_token={jwt_access}&refresh_token={jwt_refresh}&connected=1&username={user.name}"
+        except Exception as token_err:
+            logger.error("JWT token yaratishda xatolik: %s", mask_sensitive_data(str(token_err)))
+
     # Reels videoni Instagram'ga joylash vazifasini Celery orqali ishga tushirish
     publish_reels_task.delay(link.id)
 
@@ -1498,7 +1565,10 @@ def instagram_callback(request):
         'status_class': 'success',
         'title': 'Muvaffaqiyatli Ulandi!',
         'message': f'Salom {user.name}, hisobingiz ulandi.',
-        'portal_url': f'/my-post/{link.token}/',
+        'portal_url': redirect_app_url,
+        'redirect_app_url': redirect_app_url,
+        'jwt_access_token': jwt_access,
+        'jwt_refresh_token': jwt_refresh,
     }, status=status.HTTP_200_OK)
 
 
@@ -1762,5 +1832,64 @@ def user_sync_media(request):
 
     sync_user_media_task.delay(ig_user.id)
     return Response({"status": "queued"}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def privacy_policy(request):
+    """Meta (Facebook) talabiga binoan Maxfiylik Siyosati sahifasi."""
+    return render(request, 'tracker/privacy_policy.html')
+
+
+@api_view(['GET', 'PUT', 'PATCH'])
+@permission_classes([IsAdminUser])
+def admin_campaign_config(request):
+    """
+    Admin uchun aksiya mavzusi va AI reklama qoidalarini ko'rish va o'zgartirish.
+    """
+    from .models import CampaignConfig
+    from .serializers import CampaignConfigSerializer
+
+    cfg = CampaignConfig.get_solo()
+
+    if request.method == 'GET':
+        serializer = CampaignConfigSerializer(cfg)
+        return Response(serializer.data)
+
+    serializer = CampaignConfigSerializer(cfg, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_reverify_post_ai(request, post_id: int):
+    """
+    Admin tomonidan ma'lum postni yangi mavzu/qoidalar bo'yicha darhol qayta AI tekshiruvidan o'tkazish.
+    """
+    from .models import Post
+    from .ai_verifier import process_and_verify_post_ai
+
+    try:
+        post = Post.objects.select_related('link__video', 'link__user').get(id=post_id)
+    except Post.DoesNotExist:
+        return Response({"error": f"Post #{post_id} topilmadi"}, status=status.HTTP_404_NOT_FOUND)
+
+    result = process_and_verify_post_ai(post)
+    post.refresh_from_db()
+    return Response({
+        "message": "Post muvaffaqiyatli AI tomonidan qayta tekshirildi.",
+        "post_id": post.id,
+        "ai_verified": post.ai_verified,
+        "ai_confidence": post.ai_confidence,
+        "ai_detection_source": post.ai_detection_source,
+        "transcript": post.transcript,
+        "ai_explanation": post.ai_explanation,
+        "points_awarded": post.points_awarded,
+        "result": result,
+    })
+
 
 

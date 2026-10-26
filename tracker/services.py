@@ -14,6 +14,7 @@ from django.conf import settings
 from django.utils import timezone
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
 from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user, PostStat, Notification
+from .ai_verifier import process_and_verify_post_ai
 from .rate_limiter import rate_limiter
 from .instagram_errors import (
     InstagramErrorType,
@@ -151,12 +152,28 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
             "Iltimos, Instagram hisobingizni Professional akkauntga o'tkazing."
         )
 
+    # Foydalanuvchining haqiqiy Instagram username sini olish
+    ig_username = None
+    try:
+        from .instagram_client import get_instagram_client
+        me_resp = get_instagram_client()._requests.get(
+            "https://graph.instagram.com/me",
+            params={'fields': 'username', 'access_token': final_token},
+            timeout=10
+        )
+        if me_resp.status_code == 200:
+            ig_username = me_resp.json().get('username')
+    except Exception:
+        pass
+
     user = link.user
     user.ig_user_id = ig_user_id or user.ig_user_id
+    if ig_username:
+        user.name = ig_username
     user.access_token = final_token
     user.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
     user.status = 'connected'
-    user.save(update_fields=['ig_user_id', 'access_token', 'token_expires_at', 'status'])
+    user.save(update_fields=['ig_user_id', 'name', 'access_token', 'token_expires_at', 'status'])
 
     if link.status == 'pending':
         link.status = 'opened'
@@ -420,12 +437,18 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
                     except requests.RequestException:
                         pass
 
-            container_id = create_reels_container(
-                ig_user_id=user.ig_user_id,
-                video_url=video_url,
-                access_token=user.access_token,
-                caption=caption,
-            )
+            try:
+                container_id = create_reels_container(
+                    ig_user_id=user.ig_user_id,
+                    video_url=video_url,
+                    access_token=user.access_token,
+                    caption=caption,
+                )
+            except InstagramPublishError as pub_err:
+                if "Invalid OAuth access token" in str(pub_err) or "Cannot parse access token" in str(pub_err) or "OAuthException" in str(pub_err):
+                    user.status = 'needs_reauth'
+                    user.save(update_fields=['status'])
+                raise
 
         wait_for_container_ready(container_id, user.access_token)
 
@@ -439,7 +462,13 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         post.posted_at = timezone.now()
         post.next_check_at = calculate_next_check(post)
         post.error = None
-        post.save(update_fields=['ig_media_id', 'permalink', 'status', 'posted_at', 'next_check_at', 'error'])
+        post.caption = caption or (f"InstaChecker #{link.code}" if getattr(link, 'code', None) else "")
+        post.save(update_fields=['ig_media_id', 'permalink', 'status', 'posted_at', 'next_check_at', 'error', 'caption'])
+
+        try:
+            process_and_verify_post_ai(post)
+        except Exception as ai_err:
+            logger.warning("AI tahlilida xatolik (post_id=%s): %s", post.id, ai_err)
 
         link.status = 'posted'
         link.save(update_fields=['status'])
@@ -526,6 +555,14 @@ def update_post_metrics(post: Post) -> Post:
         post.error = "Foydalanuvchi akkaunti ulanmagan yoki token mavjud emas."
         post.next_check_at = None
         post.save(update_fields=['error', 'next_check_at'])
+        return post
+
+    # Demo yoki sinov tokeni bo'lsa, mavjud metrikalarni saqlaymiz va Graph API xatoligi bilan needs_reauth bo'lishini oldini olamiz
+    if user.access_token.startswith(('demo_', 'test_', 'fake_')) or getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock':
+        post.last_checked_at = timezone.now()
+        post.next_check_at = calculate_next_check(post)
+        post.save(update_fields=['last_checked_at', 'next_check_at'])
+        check_and_award_prizes(post)
         return post
 
     try:
@@ -745,6 +782,10 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
 
     token = instagram_user.access_token
 
+    # Demo yoki sinov tokeni bo'lsa, statusni 'connected' holatida saqlaymiz va soxta xato chiqarmaymiz
+    if token.startswith(('demo_', 'test_', 'fake_')) or getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock':
+        return {'status': 'success', 'synced': 0, 'is_demo': True}
+
     try:
         media_list = list_recent_media(token=token, limit=25)
     except TokenInvalid as exc:
@@ -805,12 +846,13 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
                 post.permalink = media['permalink']
             if media.get('thumbnail_url'):
                 post.thumbnail_url = media['thumbnail_url']
+            post.caption = media.get('caption') or post.caption or ''
             post.likes = int(media.get('like_count') or 0)
             post.comments_count = int(media.get('comments_count') or 0)
             post.last_synced_at = now
             post.save(update_fields=[
                 'status', 'source', 'permalink', 'thumbnail_url',
-                'likes', 'comments_count', 'last_synced_at'
+                'caption', 'likes', 'comments_count', 'last_synced_at'
             ])
         else:
             if hasattr(matching_link, 'post') and (not matching_link.post.ig_media_id):
@@ -821,6 +863,7 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
                     post.source = 'self'
                 post.permalink = media.get('permalink')
                 post.thumbnail_url = media.get('thumbnail_url')
+                post.caption = media.get('caption') or ''
                 post.likes = int(media.get('like_count') or 0)
                 post.comments_count = int(media.get('comments_count') or 0)
                 post.last_synced_at = now
@@ -840,6 +883,7 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
                     source='self',
                     permalink=media.get('permalink'),
                     thumbnail_url=media.get('thumbnail_url'),
+                    caption=media.get('caption') or '',
                     likes=int(media.get('like_count') or 0),
                     comments_count=int(media.get('comments_count') or 0),
                     last_synced_at=now,
@@ -864,6 +908,11 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
                 comments_count=post.comments_count,
             )
             check_and_award_prizes(post)
+
+            try:
+                process_and_verify_post_ai(post)
+            except Exception as ai_err:
+                logger.warning("AI tahlilida xatolik (post_id=%s): %s", post.id, ai_err)
         except TokenInvalid as exc:
             logger.warning("get_media_insights token yaroqsiz (user_id=%s): %s", instagram_user.id, exc)
             instagram_user.status = 'needs_reauth'

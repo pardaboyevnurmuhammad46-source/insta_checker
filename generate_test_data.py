@@ -76,10 +76,9 @@ def generate_demo_data():
         personal_video.save()
 
     # Bekzodning Post 1: 1 250 ko'rish (500 va 1000 marralarga yetgan)
-    link1, _ = UniqueLink.objects.get_or_create(
-        user=ig_bekzod,
-        defaults={"status": "posted", "video": personal_video}
-    )
+    link1 = UniqueLink.objects.filter(user=ig_bekzod, video=personal_video).first()
+    if not link1:
+        link1 = UniqueLink.objects.create(user=ig_bekzod, status="posted", video=personal_video)
     post1, _ = Post.objects.get_or_create(
         link=link1,
         defaults={
@@ -167,23 +166,22 @@ def generate_demo_data():
         }
     )
 
-    link_dilshod, _ = UniqueLink.objects.get_or_create(
-        user=ig_dilshod,
-        defaults={"status": "posted", "video": default_video}
-    )
-    Post.objects.get_or_create(
-        link=link_dilshod,
-        defaults={
-            "status": "published",
-            "ig_media_id": "18055667788",
-            "permalink": "https://www.instagram.com/reel/C556677889/",
-            "views": 530,
-            "likes": 42,
-            "comments_count": 9,
-            "posted_at": timezone.now() - timedelta(days=2),
-            "last_checked_at": timezone.now() - timedelta(hours=2),
-        }
-    )
+    link_dilshod = UniqueLink.objects.filter(user=ig_dilshod, video=default_video).first()
+    if not link_dilshod:
+        link_dilshod = UniqueLink.objects.create(user=ig_dilshod, status="posted", video=default_video)
+    post_dilshod = Post.objects.filter(link=link_dilshod).first()
+    if not post_dilshod:
+        post_dilshod = Post.objects.create(
+            link=link_dilshod,
+            status="published",
+            ig_media_id="18055667788",
+            permalink="https://www.instagram.com/reel/C556677889/",
+            views=530,
+            likes=42,
+            comments_count=9,
+            posted_at=timezone.now() - timedelta(days=2),
+            last_checked_at=timezone.now() - timedelta(hours=2),
+        )
 
     # 5. Foydalanuvchi 3: Nodira (Yangi ro'yxatdan o'tgan, Instagramga hali ulanmagan)
     user_nodira, _ = User.objects.get_or_create(username="nodira")
@@ -197,6 +195,56 @@ def generate_demo_data():
             "status": "pending",
         }
     )
+
+    # 6. Asosiy Foydalanuvchi: nurmuhammad va nurmuhmmad_pardaboyev (Instagram to'liq ulangan, Reels va sovrinlar mavjud)
+    for idx, un in enumerate(["nurmuhammad", "nurmuhmmad_pardaboyev"], start=1):
+        u_nur, _ = User.objects.get_or_create(username=un)
+        u_nur.set_password("user123")
+        u_nur.first_name = "Nurmuhammad"
+        u_nur.last_name = "Pardaboyev"
+        u_nur.save()
+
+        ig_nur, _ = InstagramUser.objects.get_or_create(
+            user=u_nur,
+            defaults={
+                "name": "nurmuhammad_pardaboyev",
+                "ig_user_id": f"1784146856371300{idx}",
+                "access_token": f"demo_token_nurmuhammad_2026_{idx}",
+                "status": "connected",
+                "token_expires_at": timezone.now() + timedelta(days=60),
+            }
+        )
+        ig_nur.name = "nurmuhammad_pardaboyev"
+        ig_nur.ig_user_id = f"1784146856371300{idx}"
+        ig_nur.status = "connected"
+        ig_nur.access_token = f"demo_token_nurmuhammad_2026_{idx}"
+        ig_nur.token_expires_at = timezone.now() + timedelta(days=60)
+        ig_nur.save()
+
+        link_nur = UniqueLink.objects.filter(user=ig_nur, video=default_video).first()
+        if not link_nur:
+            link_nur = UniqueLink.objects.create(user=ig_nur, status="posted", video=default_video)
+
+        post_nur = Post.objects.filter(link=link_nur).first()
+        if not post_nur:
+            post_nur = Post.objects.create(
+                link=link_nur,
+                status="published",
+                ig_media_id=f"17841468563713006_reel_{idx}",
+                permalink=f"https://www.instagram.com/reel/nurmuhammad_pardaboyev_{idx}/",
+                views=2500,
+                likes=180,
+                comments_count=35,
+                posted_at=timezone.now() - timedelta(days=3),
+                last_checked_at=timezone.now() - timedelta(minutes=5),
+            )
+        post_nur.views = 2500
+        post_nur.likes = 180
+        post_nur.comments_count = 35
+        post_nur.save()
+
+        Prize.objects.get_or_create(post=post_nur, milestone=500, defaults={"sent_at": timezone.now() - timedelta(days=2)})
+        Prize.objects.get_or_create(post=post_nur, milestone=1000, defaults={"sent_at": timezone.now() - timedelta(days=1)})
 
     print("\n" + "=" * 50)
     print("NAMUNAVIY MA'LUMOTLAR MUVAFFAQIYATLI YARATILDI!")

@@ -2,7 +2,17 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from rest_framework import serializers
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
-from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, Video, PostStat, Notification
+from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, Video, PostStat, Notification, CampaignConfig
+
+
+class CampaignConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CampaignConfig
+        fields = [
+            'id', 'topic', 'brand_name', 'required_keywords',
+            'ai_prompt_instructions', 'points_reward', 'updated_at'
+        ]
+        read_only_fields = ['id', 'updated_at']
 
 
 class InstagramUserSerializer(serializers.ModelSerializer):
@@ -172,6 +182,12 @@ class CampaignPostSerializer(serializers.ModelSerializer):
             'last_synced_at',
             'username',
             'code',
+            'ai_verified',
+            'ai_confidence',
+            'ai_detection_source',
+            'transcript',
+            'ai_explanation',
+            'points_awarded',
         ]
         read_only_fields = fields
 
@@ -261,6 +277,14 @@ class UserPublishStatusOutputSerializer(serializers.Serializer):
     can_publish_reason = serializers.CharField(allow_null=True, required=False)
     code = serializers.CharField(allow_null=True, required=False)
     upload_limits = serializers.DictField(required=False)
+    ai_verified = serializers.BooleanField(default=False, required=False)
+    ai_confidence = serializers.FloatField(default=0.0, required=False)
+    ai_detection_source = serializers.CharField(allow_null=True, required=False)
+    transcript = serializers.CharField(allow_null=True, required=False)
+    ai_explanation = serializers.CharField(allow_null=True, required=False)
+    points_awarded = serializers.IntegerField(default=0, required=False)
+    last_checked_at = serializers.DateTimeField(allow_null=True, required=False)
+    next_check_at = serializers.DateTimeField(allow_null=True, required=False)
 
 class UserProfileOutputSerializer(serializers.Serializer):
     id = serializers.IntegerField()

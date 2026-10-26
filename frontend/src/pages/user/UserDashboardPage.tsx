@@ -3,260 +3,163 @@ import { Link } from 'react-router-dom';
 import { apiClient } from '../../api/client';
 import type { UserSummary, Post } from '../../types';
 import { formatNumber, formatDate } from '../../utils/format';
-import {
-  Eye,
-  Heart,
-  MessageCircle,
-  Video as VideoIcon,
-  Award,
-  ArrowRight,
-  TrendingUp,
-  Clock,
-  Sparkles,
-} from 'lucide-react';
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts';
+import { Eye, Heart, MessageCircle, Video as VideoIcon, Award, ArrowRight, TrendingUp, Sparkles, AlertTriangle } from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Area, AreaChart } from 'recharts';
 
 export const UserDashboardPage: React.FC = () => {
   const [summary, setSummary] = useState<UserSummary | null>(null);
   const [recentPosts, setRecentPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<'7' | '30'>('7');
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        setError(null);
         const [sumRes, postsRes] = await Promise.all([
           apiClient.get<UserSummary>('/api/me/summary/'),
-          apiClient.get('/api/me/posts/?page_size=7'),
+          apiClient.get(`/api/me/posts/?page_size=15&days=${timeRange}`),
         ]);
         setSummary(sumRes.data);
-        setRecentPosts(postsRes.data.results || []);
-      } catch (err: any) {
-        setError(err.detail || 'Maʼlumotlarni yuklashda xatolik yuz berdi');
+        // Only take active posts for chart logic to avoid 0 dips
+        const activePosts = (postsRes.data.results || []).filter((p: any) => p.status !== 'deleted');
+        setRecentPosts(activePosts);
+      } catch (err) {
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
-  }, []);
+  }, [timeRange]);
 
-  if (loading) {
-    return (
-      <div className="space-y-6 animate-pulse">
-        <div className="h-8 bg-slate-800 rounded w-48" />
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-28 bg-slate-800 rounded-xl" />
-          ))}
-        </div>
-        <div className="h-72 bg-slate-800 rounded-xl" />
-      </div>
-    );
+  if (loading && !summary) {
+    return <div className="animate-pulse space-y-6"><div className="h-32 bg-slate-900 rounded-2xl" /><div className="h-64 bg-slate-900 rounded-2xl" /></div>;
   }
+  if (!summary) return <div className="text-center py-10 text-slate-400">Xatolik.</div>;
 
-  if (error || !summary) {
-    return (
-      <div className="bg-rose-950/40 border border-rose-800 text-rose-200 p-6 rounded-xl text-center">
-        <p>{error || 'Statistikani yuklab boʻlmadi.'}</p>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-4 px-4 py-2 bg-rose-700 hover:bg-rose-600 text-white rounded-lg text-sm"
-        >
-          Qayta urinish
-        </button>
-      </div>
-    );
-  }
+  const chartData = [...recentPosts].reverse().map(p => ({
+    name: p.posted_at ? new Date(p.posted_at).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }) : '',
+    views: p.views,
+  }));
 
-  // Backend'dan olingan ma'lumotlar
-  const progressPercent = summary.progress_percent || 0;
-  const viewsRemaining = summary.views_remaining || 0;
-  const nextMilestone = summary.next_milestone || 0;
-
-  // Chart data from recent posts
-  const chartData = [...recentPosts]
-    .reverse()
-    .map((p, idx) => ({
-      name: p.posted_at ? new Date(p.posted_at).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }) : `#${idx + 1}`,
-      views: p.views,
-      likes: p.likes,
-    }));
+  const bestPost = [...recentPosts].sort((a, b) => b.views - a.views)[0];
 
   return (
-    <div className="space-y-8">
-      {/* Page Title */}
+    <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            Mening Natijalarim
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Instagram Reels statistikasi va sovrinlar holati
-          </p>
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white">Xulosa</h1>
+          <p className="text-slate-400 text-sm mt-1">Umumiy statistika va o'sish dinamikasi</p>
         </div>
-
-        <Link
-          to="/app/video"
-          className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition shadow-md self-start md:self-auto"
-        >
-          <span>Videoni joylash</span>
-          <ArrowRight size={16} />
+        <Link to="/app/video" className="inline-flex items-center gap-2 bg-white text-slate-900 px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:bg-slate-200 transition active:scale-95 w-fit">
+          Videoni joylash <ArrowRight size={16} />
         </Link>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Ko'rishlar</span>
-            <span className="p-2 bg-sky-950 text-sky-400 rounded-lg">
-              <Eye size={18} />
-            </span>
+      {/* Hero Stats Card */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="md:col-span-2 bg-gradient-to-br from-indigo-900/80 to-slate-900 p-6 rounded-2xl border border-indigo-500/30 flex flex-col justify-between relative overflow-hidden shadow-xl">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10"></div>
+          <div>
+            <h3 className="text-indigo-200 text-sm font-semibold uppercase tracking-wider mb-1">Jami Ko'rishlar</h3>
+            <div className="text-4xl md:text-5xl font-black text-white">{formatNumber(summary.total_views)}</div>
           </div>
-          <div className="text-2xl font-bold text-white tracking-tight">
-            {formatNumber(summary.total_views)}
+          <div className="mt-6 flex gap-4 text-sm">
+             <div className="flex items-center gap-1.5 text-rose-300 bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-500/20">
+               <Heart size={16} /> <span className="font-bold">{formatNumber(summary.total_likes)}</span>
+             </div>
+             <div className="flex items-center gap-1.5 text-emerald-300 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+               <MessageCircle size={16} /> <span className="font-bold">{formatNumber(summary.total_comments)}</span>
+             </div>
           </div>
-          <span className="text-[11px] text-slate-500 mt-1">Jami reels ko'rishlar</span>
         </div>
 
-        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Like'lar</span>
-            <span className="p-2 bg-rose-950 text-rose-400 rounded-lg">
-              <Heart size={18} />
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-white tracking-tight">
-            {formatNumber(summary.total_likes)}
-          </div>
-          <span className="text-[11px] text-slate-500 mt-1">Barcha yoqtirishlar</span>
-        </div>
-
-        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Izohlar</span>
-            <span className="p-2 bg-emerald-950 text-emerald-400 rounded-lg">
-              <MessageCircle size={18} />
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-white tracking-tight">
-            {formatNumber(summary.total_comments)}
-          </div>
-          <span className="text-[11px] text-slate-500 mt-1">Jami izohlar soni</span>
-        </div>
-
-        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Postlar</span>
-            <span className="p-2 bg-purple-950 text-purple-400 rounded-lg">
-              <VideoIcon size={18} />
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-white tracking-tight">
-            {summary.posts_count}
-          </div>
-          <span className="text-[11px] text-slate-500 mt-1">Joylashtirilgan videolar</span>
-        </div>
-
-        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between col-span-2 lg:col-span-1">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Yutuqlar</span>
-            <span className="p-2 bg-amber-950 text-amber-400 rounded-lg">
-              <Award size={18} />
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-white tracking-tight">
-            {summary.prizes_count} ta
-          </div>
-          <span className="text-[11px] text-slate-500 mt-1">Erishilgan sovrinlar</span>
+        {/* Milestone Card */}
+        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col justify-between space-y-4">
+           <div>
+             <div className="w-10 h-10 bg-amber-500/20 text-amber-400 rounded-xl flex items-center justify-center mb-3">
+               <Award size={20} />
+             </div>
+             <h3 className="text-sm text-slate-400 font-medium">Keyingi sovrin marrasi</h3>
+             <div className="text-2xl font-bold text-white mt-1">{formatNumber(summary.next_milestone)} <span className="text-sm font-normal text-slate-500">ko'rish</span></div>
+           </div>
+           
+           <div>
+             <div className="flex justify-between text-[10px] text-slate-400 mb-1.5 font-bold">
+               <span>PROGRES</span>
+               <span className="text-amber-400">{summary.progress_percent}%</span>
+             </div>
+             <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                <div className="bg-gradient-to-r from-amber-600 to-amber-400 h-full rounded-full" style={{width: `${Math.max(2, summary.progress_percent || 0)}%`}}></div>
+             </div>
+             <p className="text-[10px] text-slate-500 mt-2">Yana {formatNumber(summary.views_remaining)} ko'rish qoldi</p>
+           </div>
         </div>
       </div>
 
-      {/* Milestone Progress Card */}
-      <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/40 p-6 rounded-2xl border border-slate-800 shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-              <Sparkles size={24} />
-            </div>
-            <div>
-              <h3 className="font-semibold text-white text-base">
-                Keyingi sovrin: <span className="text-amber-400 font-bold">{formatNumber(nextMilestone)}</span> ko'rish
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Chart */}
+        <div className="lg:col-span-2 bg-slate-900 p-6 rounded-2xl border border-slate-800">
+           <div className="flex items-center justify-between mb-6">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <TrendingUp size={18} className="text-indigo-400" /> Ko'rishlar O'sishi
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {viewsRemaining > 0
-                  ? `Sovringa erishish uchun yana ${formatNumber(viewsRemaining)} ta ko'rish qoldi`
-                  : 'Tabriklaymiz, barcha belgilangan marralarga erishildi!'}
-              </p>
-            </div>
-          </div>
-          <span className="text-sm font-bold text-indigo-400 self-start md:self-auto">
-            {progressPercent}%
-          </span>
+              <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+                <button onClick={() => setTimeRange('7')} className={`px-3 py-1 rounded text-xs font-semibold ${timeRange === '7' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>7 kun</button>
+                <button onClick={() => setTimeRange('30')} className={`px-3 py-1 rounded text-xs font-semibold ${timeRange === '30' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>30 kun</button>
+              </div>
+           </div>
+           
+           {chartData.length > 0 ? (
+             <div className="h-64 w-full">
+               <ResponsiveContainer width="100%" height="100%">
+                 <AreaChart data={chartData} margin={{top:10, right:10, left:-20, bottom:0}}>
+                   <defs>
+                     <linearGradient id="colorViews" x1="0" y1="0" x2="0" y2="1">
+                       <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                       <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                     </linearGradient>
+                   </defs>
+                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                   <XAxis dataKey="name" stroke="#64748b" fontSize={10} axisLine={false} tickLine={false} />
+                   <YAxis stroke="#64748b" fontSize={10} axisLine={false} tickLine={false} tickFormatter={val => formatNumber(val)} />
+                   <Tooltip contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#fff'}} />
+                   <Area type="monotone" dataKey="views" stroke="#818cf8" strokeWidth={3} fillOpacity={1} fill="url(#colorViews)" />
+                 </AreaChart>
+               </ResponsiveContainer>
+             </div>
+           ) : (
+             <div className="h-64 flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
+               <AlertTriangle size={24} className="text-slate-600" />
+               <p>Tanlangan davr uchun faol postlar yo'q</p>
+             </div>
+           )}
         </div>
 
-        {/* Progress bar */}
-        <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5">
-          <div
-            className="bg-gradient-to-r from-indigo-500 to-pink-500 h-full rounded-full transition-all duration-700"
-            style={{ width: `${Math.max(4, Math.min(100, progressPercent))}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Views Growth Chart */}
-      <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <TrendingUp size={18} className="text-indigo-400" />
-            <h3 className="font-semibold text-white text-base">Ko'rishlar O'sish Dinamikasi</h3>
-          </div>
-          {summary.last_checked_at && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <Clock size={14} />
-              <span>Oxirgi tekshiruv: {formatDate(summary.last_checked_at)}</span>
+        {/* Best Post */}
+        <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col">
+          <h3 className="font-bold text-white flex items-center gap-2 mb-4">
+            <Sparkles size={18} className="text-amber-400" /> Eng zo'r natija
+          </h3>
+          
+          {bestPost ? (
+            <div className="flex-1 flex flex-col items-center text-center justify-center space-y-4">
+               {bestPost.thumbnail_url ? (
+                  <img src={bestPost.thumbnail_url} alt="Best" className="w-24 h-36 object-cover rounded-xl shadow-lg border border-slate-700" />
+               ) : (
+                  <div className="w-24 h-36 bg-slate-800 rounded-xl flex items-center justify-center text-slate-600 border border-slate-700">
+                    <VideoIcon size={32} />
+                  </div>
+               )}
+               <div>
+                 <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Kod: <span className="text-amber-400">{bestPost.code || 'Yo\'q'}</span></p>
+                 <h4 className="text-2xl font-black text-white">{formatNumber(bestPost.views)} <span className="text-sm font-normal text-slate-400">ko'rish</span></h4>
+               </div>
             </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-xs text-slate-500 text-center">Hali post joylanmagan.</div>
           )}
         </div>
-
-        {chartData.length > 0 ? (
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
-                <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(val) => formatNumber(val)} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', color: '#fff' }}
-                  formatter={(value: any) => [formatNumber(value), 'Koʻrishlar']}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="views"
-                  stroke="#6366f1"
-                  strokeWidth={3}
-                  dot={{ r: 4, fill: '#818cf8' }}
-                  activeDot={{ r: 6 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
-            Hozircha postlar mavjud emas. Birinchi videongizni joylang!
-          </div>
-        )}
       </div>
     </div>
   );

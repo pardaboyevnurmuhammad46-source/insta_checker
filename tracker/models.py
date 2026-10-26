@@ -237,6 +237,13 @@ class Post(models.Model):
     next_check_at = models.DateTimeField(null=True, blank=True, db_index=True)
     error = models.TextField(null=True, blank=True)
     retry_count = models.PositiveIntegerField(default=0)
+    caption = models.TextField(null=True, blank=True)
+    transcript = models.TextField(null=True, blank=True)
+    ai_verified = models.BooleanField(default=False, db_index=True)
+    ai_confidence = models.FloatField(default=0.0)
+    ai_detection_source = models.CharField(max_length=20, default='none')
+    ai_explanation = models.TextField(null=True, blank=True)
+    points_awarded = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ['-id']
@@ -328,3 +335,40 @@ class DataDeletionRequest(models.Model):
 
     def __str__(self):
         return f"Deletion {self.confirmation_code} (User {self.user_id})"
+
+
+class CampaignConfig(models.Model):
+    topic = models.CharField(max_length=255, default="InstaChecker Rasmiy Aksiya Reklamasi")
+    brand_name = models.CharField(max_length=100, default="InstaChecker")
+    required_keywords = models.TextField(
+        default="instachecker, brend, #brend, homiy, aksiya, reklama",
+        help_text="Vergul bilan ajratilgan majburiy kalit soʻzlar",
+    )
+    ai_prompt_instructions = models.TextField(
+        default="Videoning audiosida (nutqda) yoki tavsifida (caption) aksiya mavzusi, brend nomi yoki homiy sovgʻasi tilga olinganini tekshir.",
+        help_text="AI ga tekshirish uchun yo'riqnoma",
+    )
+    points_reward = models.PositiveIntegerField(default=100)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Kampaniya va AI Sozlamasi"
+        verbose_name_plural = "Kampaniya va AI Sozlamalari"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(
+            id=1,
+            defaults={
+                'topic': "InstaChecker Rasmiy Aksiya Reklamasi",
+                'brand_name': "InstaChecker",
+                'required_keywords': "instachecker, brend, #brend, homiy, aksiya, reklama",
+                'ai_prompt_instructions': "Videoning audiosida (nutqda) yoki tavsifida (caption) aksiya mavzusi, brend nomi yoki homiy sovgʻasi tilga olinganini tekshir.",
+                'points_reward': 100,
+            }
+        )
+        return obj
+
+    def __str__(self):
+        return f"CampaignConfig: {self.topic} ({self.brand_name})"
+

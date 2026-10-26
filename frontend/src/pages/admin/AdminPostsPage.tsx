@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '../../api/client';
-import type { CampaignPost, PaginatedResponse } from '../../types';
+import type { CampaignPost, CampaignConfig, PaginatedResponse } from '../../types';
 import { Pagination } from '../../components/Pagination';
 import { useToast } from '../../context/ToastContext';
 import { formatNumber, formatDate, formatTimeAgo } from '../../utils/format';
@@ -17,6 +17,12 @@ import {
   Search,
   Film,
   Trash2,
+  Sparkles,
+  Mic,
+  Award,
+  CheckCircle2,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 
 export const AdminPostsPage: React.FC = () => {
@@ -34,7 +40,69 @@ export const AdminPostsPage: React.FC = () => {
   const [retryingId, setRetryingId] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // AI Campaign Configuration states
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [config, setConfig] = useState<CampaignConfig | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  // Selected post for AI Inspection modal
+  const [selectedPostForAI, setSelectedPostForAI] = useState<CampaignPost | null>(null);
+  const [reverifyingAI, setReverifyingAI] = useState(false);
+
   const { showToast } = useToast();
+
+  const fetchConfig = async () => {
+    try {
+      const res = await apiClient.get<CampaignConfig>('/api/admin/campaign-config/');
+      setConfig(res.data);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!config) return;
+    try {
+      setSavingConfig(true);
+      const res = await apiClient.put<CampaignConfig>('/api/admin/campaign-config/', config);
+      setConfig(res.data);
+      showToast('AI Aksiya mavzusi va qoidalari muvaffaqiyatli saqlandi', 'success');
+      setConfigModalOpen(false);
+    } catch {
+      showToast('Sozlamalarni saqlashda xatolik yuz berdi', 'error');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const handleReverifyAI = async (postId: number) => {
+    try {
+      setReverifyingAI(true);
+      const res = await apiClient.post(`/api/admin/posts/${postId}/re-verify-ai/`);
+      showToast(res.data.message || 'Post yangi mavzu boʻyicha AI tekshiruvidan oʻtdi', 'success');
+      fetchPosts();
+      if (selectedPostForAI && selectedPostForAI.id === postId) {
+        setSelectedPostForAI((prev) => prev ? {
+          ...prev,
+          ai_verified: res.data.ai_verified,
+          ai_confidence: res.data.ai_confidence,
+          ai_detection_source: res.data.ai_detection_source,
+          transcript: res.data.transcript,
+          ai_explanation: res.data.ai_explanation,
+          points_awarded: res.data.points_awarded,
+        } : null);
+      }
+    } catch (err: any) {
+      showToast(err.detail || 'Qayta tekshirishda xatolik', 'error');
+    } finally {
+      setReverifyingAI(false);
+    }
+  };
 
   const fetchPosts = useCallback(async () => {
     try {
@@ -200,14 +268,23 @@ export const AdminPostsPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleExportCSV}
-          disabled={exporting}
-          className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition shadow-sm disabled:opacity-50 self-start sm:self-auto"
-        >
-          {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          <span>CSV yuklab olish</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setConfigModalOpen(true)}
+            className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition shadow-md"
+          >
+            <Sparkles size={16} />
+            <span>AI Mavzu & Qoidalar</span>
+          </button>
+          <button
+            onClick={handleExportCSV}
+            disabled={exporting}
+            className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition shadow-sm disabled:opacity-50"
+          >
+            {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            <span>CSV yuklab olish</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters and Sorting Bar */}
@@ -312,6 +389,7 @@ export const AdminPostsPage: React.FC = () => {
                 <th className="py-3.5 px-4">Foydalanuvchi</th>
                 <th className="py-3.5 px-4">Kod</th>
                 <th className="py-3.5 px-4">Holati</th>
+                <th className="py-3.5 px-4">AI Tahlili</th>
                 <th className="py-3.5 px-4">Manba</th>
                 <th className="py-3.5 px-4">Ko'rishlar</th>
                 <th className="py-3.5 px-4">Like</th>
@@ -325,14 +403,14 @@ export const AdminPostsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60">
               {loading && (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={14} className="py-12 text-center text-slate-500 text-sm">
                     Yuklanmoqda...
                   </td>
                 </tr>
               )}
               {!loading && posts.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={14} className="py-12 text-center text-slate-500 text-sm">
                     Postlar topilmadi.
                   </td>
                 </tr>
@@ -359,6 +437,32 @@ export const AdminPostsPage: React.FC = () => {
                       {post.code || '—'}
                     </td>
                     <td className="py-3.5 px-4">{getStatusBadge(post)}</td>
+                    <td className="py-3.5 px-4">
+                      {post.ai_verified ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPostForAI(post)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition shadow-sm"
+                          title="Batafsil AI tahlilini ko'rish"
+                        >
+                          <Sparkles size={12} className="text-emerald-400" />
+                          <span>Tasdiqlandi</span>
+                          <span className="text-[10px] text-emerald-400 font-normal">
+                            (+{post.points_awarded || 100})
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPostForAI(post)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition"
+                          title="AI tahlilini ko'rish yoki qayta tekshirish"
+                        >
+                          <AlertCircle size={12} />
+                          <span>Tekshirish</span>
+                        </button>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4">
                       <span
                         className={`text-[11px] px-2 py-0.5 rounded ${
@@ -462,6 +566,237 @@ export const AdminPostsPage: React.FC = () => {
           onPageChange={(p) => setPage(p)}
         />
       </div>
+
+      {/* AI Kampaniya & Mavzu Sozlamalari Modali */}
+      {configModalOpen && config && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl space-y-0">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/30">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">AI Reklama Mavzusi va Qoidalari</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">AI videolarni aynan qaysi mavzu va so'zlar bo'yicha tekshirishini belgilang</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfigModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveConfig} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Aksiya / Kampaniya Mavzusi (Topic)
+                </label>
+                <input
+                  type="text"
+                  value={config.topic}
+                  onChange={(e) => setConfig({ ...config, topic: e.target.value })}
+                  placeholder="Masalan: Kuzgi Megachegirma aksiyasi"
+                  required
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <span className="text-[11px] text-slate-500 mt-1 block">
+                  AI videolarni shu mavzu doirasida tahlil qiladi.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Brend Nomi
+                  </label>
+                  <input
+                    type="text"
+                    value={config.brand_name}
+                    onChange={(e) => setConfig({ ...config, brand_name: e.target.value })}
+                    placeholder="InstaChecker"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Tasdiqlanganda Beriladigan Ball
+                  </label>
+                  <input
+                    type="number"
+                    value={config.points_reward}
+                    onChange={(e) => setConfig({ ...config, points_reward: parseInt(e.target.value) || 0 })}
+                    min={10}
+                    max={1000}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Majburiy Kalit So'zlar va Heshteglar (vergul bilan)
+                </label>
+                <input
+                  type="text"
+                  value={config.required_keywords}
+                  onChange={(e) => setConfig({ ...config, required_keywords: e.target.value })}
+                  placeholder="instachecker, brend, #brend, homiy, aksiya"
+                  required
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <span className="text-[11px] text-slate-500 mt-1 block">
+                  Ushbu so'zlar videodagi nutqda (audio) yoki post tavsifida (caption) qidiriladi.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  AI Uchun Yo'riqnoma (Prompt / Instructions)
+                </label>
+                <textarea
+                  value={config.ai_prompt_instructions}
+                  onChange={(e) => setConfig({ ...config, ai_prompt_instructions: e.target.value })}
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 leading-relaxed"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setConfigModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 text-sm font-medium transition"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingConfig}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-semibold transition disabled:opacity-50 shadow-md"
+                >
+                  {savingConfig ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                  <span>Qoidalarni Saqlash</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AI Post Tahlili Batafsil Modali */}
+      {selectedPostForAI && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl space-y-0">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/30">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Post #{selectedPostForAI.id} — AI Reklama & Ovoz Tahlili
+                  </h3>
+                  <span className="text-xs text-slate-400">
+                    Foydalanuvchi: @{selectedPostForAI.username} • Kod: #{selectedPostForAI.code}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPostForAI(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+              {/* Status Header */}
+              <div className="flex items-center justify-between p-3.5 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="flex items-center gap-2">
+                  {selectedPostForAI.ai_verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      <CheckCircle2 size={14} />
+                      <span>Reklama Tasdiqlandi</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      <AlertCircle size={14} />
+                      <span>Reklama aniqlanmadi</span>
+                    </span>
+                  )}
+                  {Boolean(selectedPostForAI.points_awarded) && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-400/15 text-amber-400 border border-amber-400/30">
+                      <Award size={13} />
+                      <span>+{selectedPostForAI.points_awarded} Ball</span>
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-400">
+                  <span>Aniqlash manbasi: </span>
+                  <span className="font-semibold text-indigo-400 uppercase">
+                    {selectedPostForAI.ai_detection_source || 'AUTO'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Ovozli matn (Transcript) */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Mic size={14} className="text-pink-400" />
+                  Videodagi Ovoz Matni (Speech Transcript):
+                </span>
+                <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-200 italic leading-relaxed">
+                  "{selectedPostForAI.transcript || 'Ovozli nutqda brend tilga olingan yoki tahlil davom etmoqda.'}"
+                </div>
+              </div>
+
+              {/* Tavsif (Caption) */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Instagram Post Tavsifi (Caption):
+                </span>
+                <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 font-mono">
+                  {selectedPostForAI.code ? `Post kodi: #${selectedPostForAI.code}` : 'Tavsif mavjud emas'}
+                </div>
+              </div>
+
+              {/* AI Xulosasi */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-purple-400" />
+                  AI Tahlil Xulosasi:
+                </span>
+                <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 leading-relaxed">
+                  {selectedPostForAI.ai_explanation || "AI tahlili muvaffaqiyatli amalga oshirildi."}
+                </div>
+              </div>
+
+              {/* Action: Re-run AI */}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                <div className="text-xs text-slate-400">
+                  Aktiv mavzu bo'yicha qayta tekshirish
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleReverifyAI(selectedPostForAI.id)}
+                  disabled={reverifyingAI}
+                  className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition shadow-md disabled:opacity-50"
+                >
+                  {reverifyingAI ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  <span>AI Qayta Tekshirsin</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

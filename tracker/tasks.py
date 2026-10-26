@@ -125,7 +125,10 @@ def check_all_due_posts_task():
         with transaction.atomic():
             ids = list(
                 Post.objects.select_for_update(skip_locked=True)
-                .filter(status='published', next_check_at__lte=now)
+                .filter(
+                    models.Q(status__in=['published', 'verified']),
+                    models.Q(next_check_at__lte=now) | models.Q(next_check_at__isnull=True)
+                )
                 .order_by('next_check_at')
                 .values_list('id', flat=True)[:batch_size]
             )
@@ -142,6 +145,23 @@ def check_all_due_posts_task():
 
     logger.info("Vaqti yetgan postlar tekshiruvi: %d ta post topildi va navbatga qo'yildi", total_dispatched)
     return total_dispatched
+
+
+@shared_task
+def verify_post_ai_task(post_id: int):
+    """
+    Berilgan post uchun fon rejimida AI audio va matn tekshiruvini amalga oshiradi.
+    """
+    try:
+        from .ai_verifier import process_and_verify_post_ai
+        post = Post.objects.select_related('link__video', 'link__user').get(id=post_id)
+        return process_and_verify_post_ai(post)
+    except Post.DoesNotExist:
+        logger.warning("verify_post_ai_task: Post topilmadi id=%s", post_id)
+        return None
+    except Exception as exc:
+        logger.exception("verify_post_ai_task da xatolik (post_id=%s): %s", post_id, exc)
+        return None
 
 
 @shared_task

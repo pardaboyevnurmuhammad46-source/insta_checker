@@ -18,8 +18,10 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file
-load_dotenv(BASE_DIR / '.env')
+# Load environment variables from .env file while preserving Docker container overrides
+docker_env = {k: os.environ[k] for k in ('DB_HOST', 'CELERY_BROKER_URL', 'CELERY_RESULT_BACKEND') if k in os.environ}
+load_dotenv(BASE_DIR / '.env', override=True)
+os.environ.update(docker_env)
 
 if 'test' in sys.argv and not os.environ.get('TOKEN_ENCRYPTION_KEY'):
     from cryptography.fernet import Fernet
@@ -238,10 +240,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'tracker.tasks.refresh_expiring_tokens_task',
         'schedule': crontab(hour=3, minute=0),
     },
-    # Har 10 daqiqada oxirgi 48 soatdagi postli userlarni sinxronizatsiya qilish
+    # Har 5 daqiqada oxirgi 48 soatdagi postli userlarni sinxronizatsiya qilish
     'sync-recent-active-users-media': {
         'task': 'tracker.tasks.sync_recent_active_users_task',
-        'schedule': 600.0,
+        'schedule': 300.0,
     },
     # Har soatda qolgan barcha foydalanuvchilarni sinxronizatsiya qilish
     'sync-other-users-media': {
