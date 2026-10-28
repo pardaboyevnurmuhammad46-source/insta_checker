@@ -180,6 +180,8 @@ class CampaignPostSerializer(serializers.ModelSerializer):
             'comments_count',
             'posted_at',
             'last_synced_at',
+            'last_checked_at',
+            'next_check_at',
             'username',
             'code',
             'ai_verified',
@@ -258,6 +260,7 @@ class AdminSummarySerializer(serializers.Serializer):
     users_by_status = serializers.DictField(child=serializers.IntegerField())
     links_by_status = serializers.DictField(child=serializers.IntegerField())
     instagram_errors_last_hour = serializers.DictField(child=serializers.IntegerField(), required=False)
+    rate_limited_accounts_count = serializers.IntegerField(default=0, required=False)
     dry_run = serializers.BooleanField(default=False, required=False)
 
 class UserPublishStatusOutputSerializer(serializers.Serializer):

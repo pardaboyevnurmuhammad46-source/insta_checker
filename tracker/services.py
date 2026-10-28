@@ -500,20 +500,24 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
 def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     """
     Post yoshiga va prizga yaqinligiga qarab keyingi tekshirish vaqtini adaptiv hisoblaydi:
-    - 0 .. 6 soat: har 15 daqiqada
-    - 6 .. 24 soat: har 1 soatda
-    - 1 .. 3 kun: har 3 soatda
-    - 3 .. 30 kun: har 24 soatda
-    - 30 kundan keyin: haftada 1 marta (7 kun)
-    Agar views kutilayotgan prizning 80% iga yetgan bo'lsa -> har 15 daqiqada.
+    - 0-24 soat: 5 daqiqa
+    - 1-7 kun: 10 daqiqa
+    - 7 kundan eski: 60 daqiqa
+    - ko'rishlar keyingi marraning 80% iga yetgan bo'lsa: 5 daqiqa
     """
-    if post.status != 'published' or not post.posted_at:
+    if post.status not in ('published', 'verified'):
         return None
 
     if now is None:
         now = timezone.now()
 
-    # Prizga yaqinlikni tekshirish
+    post_time = post.posted_at or post.last_synced_at or post.last_checked_at
+    if not post_time and post.link:
+        post_time = post.link.created_at
+    if not post_time:
+        post_time = now
+
+    # Prizga yaqinlikni tekshirish (keyingi marraning 80% iga yetgan bo'lsa -> 5 daqiqa)
     milestones = get_configured_milestones()
     awarded_milestones = list(post.prizes.values_list('milestone', flat=True))
     next_milestone = None
@@ -523,19 +527,15 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
             break
 
     if next_milestone and post.views >= (next_milestone * 0.8):
-        return now + timedelta(minutes=15)
+        return now + timedelta(minutes=5)
 
-    age = now - post.posted_at
-    if age < timedelta(hours=6):
-        return now + timedelta(minutes=15)
-    elif age < timedelta(hours=24):
-        return now + timedelta(hours=1)
-    elif age < timedelta(days=3):
-        return now + timedelta(hours=3)
-    elif age < timedelta(days=30):
-        return now + timedelta(days=1)
-    else:
-        return now + timedelta(days=7)
+    age = now - post_time
+    if age < timedelta(days=1):  # 0-24 soat
+        return now + timedelta(minutes=5)
+    elif age < timedelta(days=7):  # 1-7 kun
+        return now + timedelta(minutes=10)
+    else:  # 7 kundan eski
+        return now + timedelta(minutes=60)
 
 
 def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
@@ -664,7 +664,22 @@ def get_configured_milestones() -> list[int]:
 def check_and_award_prizes(post: Post) -> list[Prize]:
     """
     Post ko'rishlar soni (views) marralarga (milestones) yetganida Prize yozuvini yaratadi.
+    Faqat faol va qonuniy postlar ('published' yoki 'verified') uchun sovrin beriladi.
+    'rejected', 'revoked', 'deleted', 'failed' holatidagi postlarga sovrin berilmaydi.
+    Agar REQUIRE_AI_FOR_PRIZES yoqilgan bo'lsa va post.ai_verified False bo'lsa, sovrin berilmaydi.
     """
+    if post.status in ('rejected', 'revoked', 'deleted', 'failed'):
+        logger.info("Sovrin berilmadi: post_id=%s holati '%s' (taqiqlangan)", post.id, post.status)
+        return []
+
+    if post.status not in ('published', 'verified'):
+        logger.info("Sovrin berilmadi: post_id=%s holati '%s' (faol emas)", post.id, post.status)
+        return []
+
+    if getattr(settings, 'REQUIRE_AI_FOR_PRIZES', False) and not post.ai_verified:
+        logger.info("Sovrin berilmadi: post_id=%s AI tomonidan tasdiqlanmagan", post.id)
+        return []
+
     milestones = get_configured_milestones()
     awarded = []
     for milestone in sorted(milestones):
@@ -794,8 +809,8 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
         instagram_user.save(update_fields=['status'])
         return {'status': 'needs_reauth', 'error': str(exc)}
 
-    # Foydalanuvchining barcha unikal linklari va kodlari
-    user_links = list(instagram_user.links.all())
+    # Foydalanuvchining barcha unikal linklari va kodlari (N+1 oldini olish uchun select_related)
+    user_links = list(instagram_user.links.select_related('post', 'video').all())
     code_to_link = {}
     for lk in user_links:
         if lk.code:
@@ -897,9 +912,12 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
         try:
             insights = get_media_insights(token=token, media_id=post.ig_media_id)
             views = int(insights.get('views') or 0)
+            now_ts = timezone.now()
             post.views = views
-            post.last_synced_at = timezone.now()
-            post.save(update_fields=['views', 'last_synced_at'])
+            post.last_synced_at = now_ts
+            post.last_checked_at = now_ts
+            post.next_check_at = calculate_next_check(post, now=now_ts)
+            post.save(update_fields=['views', 'last_synced_at', 'last_checked_at', 'next_check_at'])
 
             PostStat.objects.create(
                 post=post,
@@ -907,12 +925,13 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
                 likes=post.likes,
                 comments_count=post.comments_count,
             )
-            check_and_award_prizes(post)
-
             try:
                 process_and_verify_post_ai(post)
+                post.refresh_from_db()
             except Exception as ai_err:
                 logger.warning("AI tahlilida xatolik (post_id=%s): %s", post.id, ai_err)
+
+            check_and_award_prizes(post)
         except TokenInvalid as exc:
             logger.warning("get_media_insights token yaroqsiz (user_id=%s): %s", instagram_user.id, exc)
             instagram_user.status = 'needs_reauth'

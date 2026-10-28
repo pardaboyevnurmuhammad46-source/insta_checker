@@ -250,6 +250,16 @@ def process_video_file(video) -> tuple[bool, str | None]:
             if not success or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
                 return False, "ffmpeg orqali videoni 9:16 formatiga o'tkazishda xatolik yuz berdi."
 
+            # Asl fayl zaxirasi (.orig.mp4) saqlab qolinadi
+            backup_path = f"{file_path}.orig.mp4"
+            if not os.path.exists(backup_path):
+                import shutil
+                try:
+                    shutil.copy2(file_path, backup_path)
+                    logger.info("Asl video zaxira nusxasi yaratildi: %s", backup_path)
+                except Exception as b_err:
+                    logger.warning("Asl videoni zaxiralashda xatolik: %s", b_err)
+
             os.replace(output_path, file_path)
             logger.info("Video muvaffaqiyatli 1080x1920 formatiga o'tkazildi: %s", file_path)
         finally:

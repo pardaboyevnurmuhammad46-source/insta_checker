@@ -158,6 +158,37 @@ DRY_RUN_PUBLISH_DELAY_SECONDS=2
 
 ---
 
+## 🎬 Instagram Reels Joylash Usullari va Monitoring Jadvali
+
+Tizimda foydalanuvchilar videoni ikkita qulay usulda joylashtirishlari mumkin:
+
+### 1-usul: "Saytdan joylash" (Avtomatik oqim)
+1. **Video tanlash**: Foydalanuvchi umumiy aksiya videosini yoki shaxsiy yuklangan videoni tanlaydi.
+2. **Joylashni boshlash**: "Saytdan joylash" tugmasi bosiladi (`POST /api/user/publish/`).
+3. **Fon vazifasi**: Celery ishchisi (`publish_reels_task`) videoni Meta Instagram Graph API orqali to'g'ridan-to'g'ri Reels formatida joylaydi.
+4. **Monitoring boshlanishi**: Post holati `queued` -> `publishing` -> `published` ga o'tadi va birinchi tekshiruv 15 soniyadan so'ng avtomatik bajariladi.
+
+### 2-usul: "O'zim joylayman" (Mustaqil / Manual oqim)
+1. **Unikal kod olish**: Foydalanuvchi kabinetida unikal aksiya kodi (masalan: `WIN789`) ko'rsatiladi va nusxalanadi.
+2. **Instagramda joylash**: Foydalanuvchi videoni Instagram ilovasi orqali Reels qilib joylaydi va tavsif (caption) qismiga o'z unikal kodini kiritadi.
+3. **Avtomatik topish**: Davriy vazifa (`sync_recent_active_users_task`) har 5 daqiqada yangi postlarni tekshiradi yoki foydalanuvchi "Postni tekshirish" tugmasini bosganda (`POST /api/user/sync-media/`) post darhol topiladi va tizimga `source='self'` sifatida ulanadi.
+4. **AI Tasdiqlash**: AI verifikator (`process_and_verify_post_ai`) tavsif va audioda unikal kod borligini tekshiradi hamda monitoringni boshlaydi.
+
+### 📊 Adaptiv Statistika Monitoring Jadvali (`calculate_next_check`)
+
+Postlar yoshiga va sovrin marrasiga yaqinligiga qarab oraliq intervallar adaptiv tarzda o'zgaradi:
+
+| Postning Yoshi / Sharti | Tekshiruv Oralig'i | Vazifasi va Maqsadi |
+| :--- | :--- | :--- |
+| **0 – 24 soat** | **Har 5 daqiqada** | Yangi Reels eng ko'p ko'riladigan dastlabki sutkada tezkor ko'rishlar statistikasini ushlash. |
+| **1 – 7 kun** | **Har 10 daqiqada** | Faol o'sish davridagi postlarni muntazam va barqaror monitoring qilish. |
+| **7 kundan eski** | **Har 60 daqiqada (1 soat)** | Eski postlar uchun Meta API limitlarini tejash. |
+| **Keyingi marraning 80% iga yetganda** | **Har 5 daqiqada** | Sovrin (Prize) marrasiga yaqinlashganda (masalan, 500 ning 400 tasida) sovrinni kechiktirmay berish. |
+
+> `check_all_due_posts_task` davriy vazifasi har 5 daqiqada ishga tushib, yuqoridagi jadval bo'yicha vaqti yetgan postlarni fonda tekshiradi.
+
+---
+
 ## 📮 Postman bilan sinash (Newman E2E)
 
 Loyihada to'liq API testi, negativ ssenariylar va avtomatlashtirilgan E2E oqimi uchun Postman to'plami tayyorlangan.

@@ -177,6 +177,24 @@ class InstagramRateLimiter:
         except Exception:
             return False
 
+    def get_rate_limited_accounts_count(self) -> int:
+        """
+        Limitga yetgan (soatiga 200 tadan oshgan) faol akkauntlar sonini qaytaradi.
+        """
+        try:
+            r = self.get_redis()
+            account_hour_limit = getattr(settings, 'INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR', 200)
+            now = time.time()
+            count = 0
+            for key in r.scan_iter(match="{ig_rate}:acc:*:hour"):
+                r.zremrangebyscore(key, '-inf', f"({now - 3600.0}")
+                if r.zcard(key) >= account_hour_limit:
+                    count += 1
+            return count
+        except Exception as exc:
+            logger.error("Limitga yetgan akkauntlarni hisoblashda xatolik: %s", exc)
+            return 0
+
     def reset(self, account_id: str | int | None = None):
         """Kesh va hisoblagichlarni tozalash (asosan testlar uchun)."""
         try:

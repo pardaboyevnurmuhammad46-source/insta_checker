@@ -61,7 +61,7 @@ export const UserLayout: React.FC = () => {
     { name: 'Bosh sahifa', path: '/app', icon: LayoutDashboard },
     { name: 'Mening videom', path: '/app/video', icon: Film },
     { name: 'Postlarim', path: '/app/posts', icon: VideoIcon },
-    { name: 'Prizlarim', path: '/app/prizes', icon: Award },
+    { name: 'Sovrinlarim', path: '/app/prizes', icon: Award },
     { name: 'Profil', path: '/app/profile', icon: UserIcon },
   ];
 
@@ -118,7 +118,7 @@ export const UserLayout: React.FC = () => {
                     }`
                   }
                 >
-                  <Icon size={18} className={({ isActive }: any) => isActive ? 'text-indigo-200' : ''} />
+                  <Icon size={18} className="shrink-0" />
                   <span>{item.name}</span>
                 </NavLink>
               );

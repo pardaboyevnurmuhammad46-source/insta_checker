@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   TrendingUp,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -89,6 +90,17 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
+      {/* Rate Limited Accounts Banner */}
+      {summary && (summary.rate_limited_accounts_count ?? 0) > 0 && (
+        <div className="bg-rose-950/40 border border-rose-800/80 p-4 rounded-xl flex items-center gap-3 text-rose-300">
+          <Clock size={20} className="text-rose-400 shrink-0" />
+          <div className="text-xs sm:text-sm">
+            <span className="font-semibold">Rate Limit cheklovi:</span>{' '}
+            {summary.rate_limited_accounts_count} ta akkaunt soatlik limitga (200 so'rov/soat) yetdi. Vazifalar xatoliksiz navbatda kutmoqda.
+          </div>
+        </div>
+      )}
+
       {/* Top Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
@@ -101,10 +113,16 @@ export const AdminDashboardPage: React.FC = () => {
           <div className="text-2xl font-bold text-white tracking-tight">
             {formatNumber(summary?.total_users)}
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-1">
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-1 flex-wrap">
             <span className="text-emerald-400">{summary?.connected_users || 0} ulangan</span>
             <span>•</span>
             <span className="text-rose-400">{summary?.needs_reauth_users || 0} reauth</span>
+            {(summary?.rate_limited_accounts_count ?? 0) > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-amber-400 font-medium">{summary?.rate_limited_accounts_count} ta limitda</span>
+              </>
+            )}
           </div>
         </div>
 

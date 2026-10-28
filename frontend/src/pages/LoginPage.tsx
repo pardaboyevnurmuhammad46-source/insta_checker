@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { apiClient } from '../api/client';
 import { Lock, User, UserPlus, LogIn, Camera as Instagram, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {

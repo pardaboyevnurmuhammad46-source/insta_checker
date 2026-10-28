@@ -104,12 +104,7 @@ def transcribe_audio(audio_path: str) -> str:
         except Exception as exc:
             logger.warning("OpenAI Whisper API orqali transkripsiya qilishda xatolik: %s", exc)
 
-    # Offline / Heuristic speech detection:
-    # Audio davomiyligi va ovoz borligini tekshiramiz
-    audio_size = os.path.getsize(audio_path)
-    if audio_size > 5000:
-        brand_name = getattr(settings, 'BRAND_NAME', 'InstaChecker')
-        return f"Assalomu alaykum! Ushbu videoda biz {brand_name} rasmiy aksiyasida ishtirok etyapmiz. Bizni kuzatib boring!"
+    # Agar OpenAI API kaliti bo'lmasa yoki xato bersa, soxta transkript qaytarmaymiz
     return ""
 
 
@@ -120,6 +115,7 @@ def verify_video_advertisement(
 ) -> dict:
     """
     Ovoz (Audio Transcript) va Tavsif (Caption) orqali reklama tilga olinganini tekshiradi.
+    Agar expected_code (unikal aksiya kodi) berilgan bo'lsa, uning mavjudligi majburiy.
     """
     caption_text = (caption or "").strip()
     expected_code_clean = (expected_code or "").strip().upper()
@@ -142,7 +138,8 @@ def verify_video_advertisement(
     # 1. Caption tahlili
     caption_upper = caption_text.upper()
     caption_lower = caption_text.lower()
-    if expected_code_clean and expected_code_clean in caption_upper:
+    code_in_caption = bool(expected_code_clean and expected_code_clean in caption_upper)
+    if code_in_caption:
         found_in_caption.append(f"Kod: {expected_code_clean}")
     for kw in brand_keywords:
         if kw in caption_lower:
@@ -150,19 +147,37 @@ def verify_video_advertisement(
 
     # 2. Audio Transcript tahlili
     transcript_lower = transcript_text.lower()
-    if expected_code_clean and expected_code_clean.lower() in transcript_lower:
+    code_in_audio = bool(expected_code_clean and expected_code_clean.lower() in transcript_lower)
+    if code_in_audio:
         found_in_audio.append(f"Kod: {expected_code_clean}")
     for kw in brand_keywords:
         if kw in transcript_lower:
             found_in_audio.append(kw)
 
-    # Natija hisoblash
-    has_caption_match = len(found_in_caption) > 0
-    has_audio_match = len(found_in_audio) > 0
-
     cfg = get_campaign_config()
     topic_name = cfg.topic if cfg else "InstaChecker Aksiya Reklamasi"
     max_pts = cfg.points_reward if cfg else 100
+
+    # Unikal kod tekshiruvi: agar expected_code berilgan bo'lsa, u majburiy
+    code_found = code_in_caption or code_in_audio
+    if expected_code_clean and not code_found:
+        return {
+            'is_verified': False,
+            'confidence': 0.10,
+            'points': 0,
+            'detection_source': 'none',
+            'explanation': (
+                f"⚠️ Unikal aksiya kodi ({expected_code_clean}) videoning nutqida ham, "
+                f"tavsifida ham topilmadi. Ishtirok uchun kod kiritilishi shart."
+            ),
+            'transcript': transcript_text,
+            'caption': caption_text,
+            'matches_found': found_in_caption + found_in_audio,
+        }
+
+    # Natija hisoblash (kod topilgan yoki expected_code talab qilinmagan holatda)
+    has_caption_match = len(found_in_caption) > 0
+    has_audio_match = len(found_in_audio) > 0
 
     confidence = 0.0
     detection_source = 'none'

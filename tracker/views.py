@@ -1,6 +1,8 @@
 import os
 import logging
 import csv
+import hmac
+import hashlib
 import requests
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -40,6 +42,7 @@ from .models import (
     Notification,
 )
 from .instagram_errors import mask_sensitive_data
+from .rate_limiter import rate_limiter
 from .serializers import (
     InstagramUserSerializer,
     VideoSerializer,
@@ -275,29 +278,43 @@ class PostViewSet(viewsets.ReadOnlyModelViewSet):
         if post.status == 'published' and post.ig_media_id:
             now = timezone.now()
             if not post.last_checked_at or (now - post.last_checked_at) >= timedelta(minutes=5):
-                try:
-                    update_post_metrics(post)
-                except Exception as exc:
-                    logger.warning("PostViewSet.stats ichida metrikalarni yangilashda xatolik: %s", exc)
+                lock_id = f"lock_metrics_{post.id}"
+                if cache.add(lock_id, "1", timeout=60):
+                    check_post_metrics_task.delay(post.id)
         stats_qs = post.stats.all().order_by('-checked_at')
         return Response(PostStatSerializer(stats_qs, many=True).data)
 
     @action(detail=True, methods=['post'], url_path='check-metrics')
     def check_metrics(self, request, pk=None):
         post = self.get_object()
-        task = check_post_metrics_task.delay(post.id)
-        return Response({"message": "Post statistikasini tekshirish vazifasi navbatga qo'yildi.", "task_id": task.id})
+        lock_id = f"lock_metrics_{post.id}"
+        if cache.add(lock_id, "1", timeout=60):
+            task = check_post_metrics_task.delay(post.id)
+            return Response({"message": "Post statistikasini tekshirish vazifasi navbatga qo'yildi.", "task_id": task.id})
+        return Response({"message": "Post statistikasini tekshirish allaqachon navbatga qo'yilgan."})
 
     @action(detail=True, methods=['post'], url_path='retry')
     def retry(self, request, pk=None):
         post = self.get_object()
         if post.status != 'failed':
             return Response({"error": "Faqat failed postni qayta joylash mumkin."}, status=status.HTTP_400_BAD_REQUEST)
-        if not (request.user.is_staff or request.user.is_superuser) and post.retry_count >= 3:
-            return Response({
-                "error": "Qayta urinishlar soni tugadi (maksimal: 3 marta).",
-                "retry_count": post.retry_count
-            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Retry limit tekshiruvi:
+        # Oddiy foydalanuvchilar: ko'pi bilan 3 marta
+        # Adminlar: Meta API cheklovlaridan saqlanish uchun ko'pi bilan 10 marta
+        if not (request.user.is_staff or request.user.is_superuser):
+            if post.retry_count >= 3:
+                return Response({
+                    "error": "Qayta urinishlar soni tugadi (maksimal: 3 marta).",
+                    "retry_count": post.retry_count
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            if post.retry_count >= 10:
+                return Response({
+                    "error": "Admin uchun maksimal qayta urinishlar limiti (10 marta) tugadi. Meta API cheklovlaridan saqlanish uchun xatolik sababini tekshiring.",
+                    "retry_count": post.retry_count
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         post.retry_count += 1
         post.status = 'queued'
         post.error = None
@@ -393,6 +410,7 @@ def admin_summary(request):
     cached_data = cache.get('admin_summary_cache')
     if cached_data is not None:
         cached_data["instagram_errors_last_hour"] = get_instagram_errors_last_hour()
+        cached_data["rate_limited_accounts_count"] = rate_limiter.get_rate_limited_accounts_count()
         cached_data["dry_run"] = bool(getattr(settings, 'INSTAGRAM_DRY_RUN', False))
         return Response(AdminSummarySerializer(cached_data).data)
 
@@ -444,6 +462,7 @@ def admin_summary(request):
         "users_by_status": {item['status']: item['count'] for item in users_by_status},
         "links_by_status": {item['status']: item['count'] for item in links_by_status},
         "instagram_errors_last_hour": errors_last_hour,
+        "rate_limited_accounts_count": rate_limiter.get_rate_limited_accounts_count(),
         "dry_run": bool(getattr(settings, 'INSTAGRAM_DRY_RUN', False)),
     }
 
@@ -574,13 +593,12 @@ def me_post_history(request, post_id):
 
     post = get_object_or_404(Post.objects.select_related('link__user'), id=post_id, link__user=ig_user)
 
-    if post.status == 'published' and post.ig_media_id:
+    if post.status in ('published', 'verified') and post.ig_media_id:
         now = timezone.now()
         if not post.last_checked_at or (now - post.last_checked_at) >= timedelta(minutes=5):
-            try:
-                update_post_metrics(post)
-            except Exception as exc:
-                logger.warning("me_post_history ichida post metrikasini yangilashda xatolik: %s", exc)
+            lock_id = f"lock_metrics_{post.id}"
+            if cache.add(lock_id, "1", timeout=60):
+                check_post_metrics_task.delay(post.id)
 
     stats = post.stats.all().order_by('checked_at')
     data = [
@@ -1056,13 +1074,14 @@ def user_connect_instagram(request):
 
         custom_token = request.data.get('access_token') if hasattr(request, 'data') else None
         token = custom_token or os.environ.get('INSTAGRAM_ACCESS_TOKEN') or getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '')
+        is_mock_or_dry_run = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
 
-        if token or getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False) or ig_user.ig_user_id:
+        if token or is_mock_or_dry_run:
             try:
-                # Mock rejim tekshiruvi yoki mavjud ulanishni qayta tiklash
-                if getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False) or (not token and ig_user.ig_user_id):
+                # Mock / DRY_RUN rejimda sinov ulanishi
+                if is_mock_or_dry_run:
                     ig_user.ig_user_id = ig_user.ig_user_id or '17841468563713006'
-                    ig_user.name = ig_user.name if (ig_user.name and ig_user.name not in ('Instagram Foydalanuvchisi', 'Yangi Foydalanuvchi')) else (request.user.username or 'nurmuhammad_pardaboyev')
+                    ig_user.name = ig_user.name if (ig_user.name and ig_user.name not in ('Instagram Foydalanuvchisi', 'Yangi Foydalanuvchi')) else (request.user.username or 'demo_user')
                     ig_user.access_token = token or ig_user.access_token or 'demo_long_lived_token'
                     ig_user.status = 'connected'
                     ig_user.token_expires_at = timezone.now() + timedelta(days=60)
@@ -1074,7 +1093,7 @@ def user_connect_instagram(request):
                         "ig_user_id": ig_user.ig_user_id,
                     })
 
-                # Real rejim: Graph API orqali tekshirish
+                # Real rejim: Faqat Graph API orqali qat'iy tekshirilgan tokenga ruxsat beriladi
                 url = "https://graph.instagram.com/me"
                 params = {'fields': 'user_id,username,account_type', 'access_token': token}
                 res = requests.get(url, params=params, timeout=12)
@@ -1092,18 +1111,17 @@ def user_connect_instagram(request):
                         "username": ig_user.name,
                         "ig_user_id": ig_user.ig_user_id,
                     })
-                elif custom_token:
+                else:
                     return Response(
                         {"error": "Instagram tokenni qabul qilmadi. Iltimos, qayta urinib ko'ring."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
             except Exception as exc:
                 logger.error("Instagram bevosita ulashda xatolik: %s", str(exc))
-                if custom_token:
-                    return Response(
-                        {"error": f"Instagram bilan bog'lanishda xatolik: {str(exc)}"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                return Response(
+                    {"error": f"Instagram bilan bog'lanishda xatolik: {str(exc)}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
     auth_url = build_instagram_auth_url(str(link.token))
     return Response({
@@ -1544,7 +1562,7 @@ def instagram_callback(request):
         user.user = django_user
         user.save(update_fields=['user'])
 
-    # JWT tokenlarni hosil qilish va to'g'ridan-to'g'ri foydalanuvchi kabinetiga yo'naltirish
+    # JWT tokenlarni hosil qilish (tokenlar URL query parametri orqali emas, status.html orqali xavfsiz o'rnatiladi)
     jwt_access = ""
     jwt_refresh = ""
     redirect_app_url = f"/my-post/{link.token}/"
@@ -1553,7 +1571,7 @@ def instagram_callback(request):
             refresh = RefreshToken.for_user(django_user)
             jwt_access = str(refresh.access_token)
             jwt_refresh = str(refresh)
-            redirect_app_url = f"/app/video?auth_token={jwt_access}&refresh_token={jwt_refresh}&connected=1&username={user.name}"
+            redirect_app_url = "/app/video?connected=1"
         except Exception as token_err:
             logger.error("JWT token yaratishda xatolik: %s", mask_sensitive_data(str(token_err)))
 
@@ -1705,7 +1723,22 @@ def instagram_webhook(request):
             return HttpResponse(challenge, content_type="text/plain")
         return HttpResponse("Forbidden", status=status.HTTP_403_FORBIDDEN)
 
-    # POST so'rovi
+    # POST so'rovi uchun Meta X-Hub-Signature-256 HMAC tekshiruvi
+    app_secret = getattr(settings, 'INSTAGRAM_APP_SECRET', None)
+    signature_header = request.headers.get('X-Hub-Signature-256') or request.META.get('HTTP_X_HUB_SIGNATURE_256')
+
+    if app_secret:
+        if not signature_header:
+            return HttpResponse("Forbidden (Missing signature)", status=status.HTTP_403_FORBIDDEN)
+        
+        expected_sig = "sha256=" + hmac.new(
+            app_secret.encode('utf-8'),
+            request.body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature_header, expected_sig):
+            return HttpResponse("Forbidden (Invalid signature)", status=status.HTTP_403_FORBIDDEN)
+
     data = request.data
     logger.info("Instagram Webhook hodisasi qabul qilindi: %s", data)
 
@@ -1720,7 +1753,9 @@ def instagram_webhook(request):
                     post = Post.objects.filter(ig_media_id=str(media_id)).first()
                     if post:
                         from .tasks import check_post_metrics_task
-                        check_post_metrics_task.delay(post.id)
+                        lock_id = f"lock_metrics_{post.id}"
+                        if cache.add(lock_id, "1", timeout=60):
+                            check_post_metrics_task.delay(post.id)
     except Exception as exc:
         logger.error("Instagram Webhook event qayta ishlashda xatolik: %s", exc)
 

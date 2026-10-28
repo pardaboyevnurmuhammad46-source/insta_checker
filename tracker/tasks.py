@@ -248,6 +248,16 @@ def sync_user_media_task(self, user_id: int):
         logger.info("Foydalanuvchi tokeni mavjud emas yoki 'needs_reauth': user_id=%s", user_id)
         return {"status": "skipped", "reason": "no_token_or_needs_reauth"}
 
+    # 1. Tezlik cheklagichdan ruxsat so'rash (bitta akkaunt soatiga 200 so'rovdan oshsa, xato bermasdan kutadi)
+    allowed, retry_after, reason = rate_limiter.acquire(account_id=user.id)
+    if not allowed:
+        logger.info(
+            "Rate limit cheklovi (%s): user_id=%s uchun %.2fs kutiladi",
+            reason, user_id, retry_after
+        )
+        countdown = max(1, int(math.ceil(retry_after)))
+        raise self.retry(countdown=countdown, max_retries=None)
+
     try:
         result = sync_user_media(user)
         logger.info("Foydalanuvchi medialari sinxronizatsiya qilindi: user_id=%s, natija=%s", user_id, result)
@@ -268,9 +278,10 @@ def sync_user_media_task(self, user_id: int):
 @shared_task
 def sync_recent_active_users_task():
     """
-    Har 10 daqiqada ishga tushadi:
-    Oxirgi 48 soat ichida posti bor (joylangan, sinxronlangan yoki yaratilgan) ulangan foydalanuvchilar
-    uchun sync_user_media_task vazifalarini ishga tushiradi.
+    Har 5 daqiqada ishga tushadi:
+    Oxirgi 48 soat ichida faol bo'lgan (link olgan, ro'yxatdan o'tgan yoki posti bor)
+    barcha ulangan foydalanuvchilar uchun sync_user_media_task vazifalarini ishga tushiradi.
+    Foydalanuvchi o'zi Instagramda joylagan postni 5-10 daqiqada topishni kafolatlaydi.
     """
     threshold = timezone.now() - timedelta(hours=48)
     user_ids = list(
@@ -289,7 +300,7 @@ def sync_recent_active_users_task():
     for uid in user_ids:
         sync_user_media_task.delay(uid)
 
-    logger.info("Oxirgi 48 soatdagi postli foydalanuvchilar sinxronizatsiyaga yuborildi: count=%d", len(user_ids))
+    logger.info("Faol foydalanuvchilar medialari sinxronizatsiyaga yuborildi: count=%d", len(user_ids))
     return len(user_ids)
 
 

@@ -51,7 +51,7 @@ class InstagramUser(models.Model):
     name = models.CharField(max_length=255)
     ig_user_id = models.CharField(max_length=100, null=True, blank=True)
     access_token = EncryptedTextField(null=True, blank=True)
-    token_expires_at = models.DateTimeField(null=True, blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -297,6 +297,7 @@ class Notification(models.Model):
     KIND_CHOICES = (
         ('prize', 'Prize'),
         ('system', 'System'),
+        ('ai_verified', 'AI Verified'),
     )
 
     user = models.ForeignKey(InstagramUser, on_delete=models.CASCADE, related_name='notifications')

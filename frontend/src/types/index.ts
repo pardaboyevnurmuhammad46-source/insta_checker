@@ -37,6 +37,8 @@ export interface Post {
   next_check_at: string | null;
   error: string | null;
   retry_count?: number;
+  code?: string;
+  thumbnail_url?: string | null;
 }
 
 export interface PostStat {
@@ -53,6 +55,7 @@ export interface Prize {
   user_name: string;
   milestone: number;
   sent_at: string;
+  post_code?: string;
 }
 
 export interface Notification {
@@ -95,6 +98,7 @@ export interface DashboardStats {
   };
   total_prizes: number;
   expiring_tokens_count: number;
+  rate_limited_accounts_count?: number;
   instagram_errors_last_hour?: InstagramErrorsSummary;
   dry_run?: boolean;
 }
@@ -144,6 +148,7 @@ export interface AdminSummary {
   total_comments: number;
   total_prizes: number;
   expiring_tokens_count: number;
+  rate_limited_accounts_count?: number;
   instagram_errors_last_hour?: InstagramErrorsSummary;
   dry_run?: boolean;
 }
@@ -195,6 +200,8 @@ export interface CampaignPost {
   comments_count: number;
   posted_at: string | null;
   last_synced_at: string | null;
+  last_checked_at?: string | null;
+  next_check_at?: string | null;
   username: string;
   code: string;
   ai_verified?: boolean;
@@ -208,7 +215,7 @@ export interface CampaignPost {
 export interface PublishStatus {
   has_post: boolean;
   post_id?: number;
-  status: 'queued' | 'publishing' | 'published' | 'failed' | 'none' | 'deleted';
+  status: 'queued' | 'publishing' | 'published' | 'verified' | 'failed' | 'none' | 'deleted';
   posted_at?: string | null;
   views?: number;
   likes?: number;

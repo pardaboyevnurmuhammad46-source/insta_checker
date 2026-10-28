@@ -43,3 +43,34 @@ export function formatTimeAgo(dateStr: string | null | undefined): string {
     return dateStr;
   }
 }
+
+const UZ_MONTHS = [
+  'yan', 'fev', 'mar', 'apr', 'may', 'iyn',
+  'iyl', 'avg', 'sen', 'okt', 'noy', 'dek'
+];
+
+export function formatChartDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    const day = d.getDate();
+    const month = UZ_MONTHS[d.getMonth()];
+    return `${day} ${month}`;
+  } catch {
+    return dateStr || '';
+  }
+}
+
+export function formatShortTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  } catch {
+    return '—';
+  }
+}

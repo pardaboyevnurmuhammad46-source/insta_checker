@@ -102,6 +102,7 @@ urlpatterns = [
     path('api/admin/export/posts.csv', admin_export_posts_csv, name='admin_export_posts_csv'),
     path('api/admin/create-user/', admin_create_user, name='admin_create_user'),
     path('api/admin/reset-password/', admin_reset_password, name='admin_reset_password'),
+    path('api/admin/reset-password/', admin_reset_password, name='admin_reset_password'),
     path('api/dashboard/', dashboard_stats, name='dashboard_stats'),
     path('api/change-password/', change_password, name='change_password'),
     path('api/public/post/<uuid:token>/', user_portal_api, name='user_portal_api'),
