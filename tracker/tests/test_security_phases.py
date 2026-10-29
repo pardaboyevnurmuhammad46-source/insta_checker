@@ -825,6 +825,31 @@ class Phase4UserInstagramAndPublishTestCase(TestCase):
         self.assertEqual(self.ig_user1.status, 'connected')
         self.assertEqual(self.ig_user1.access_token, 'direct_token_xyz')
 
+    def test_user_connect_instagram_without_token_returns_auth_url(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/user/connect-instagram/", {})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn('auth_url', data)
+        self.assertIn('instagram.com/oauth/authorize', data['auth_url'])
+
+    def test_user_disconnect_instagram(self):
+        self.client.force_authenticate(user=self.user1)
+        self.ig_user1.status = 'connected'
+        self.ig_user1.access_token = 'token_to_disconnect'
+        self.ig_user1.ig_user_id = '1784100'
+        self.ig_user1.save()
+
+        resp = self.client.post("/api/user/disconnect-instagram/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['status'], 'pending')
+
+        self.ig_user1.refresh_from_db()
+        self.assertEqual(self.ig_user1.status, 'pending')
+        self.assertIsNone(self.ig_user1.access_token)
+        self.assertIsNone(self.ig_user1.ig_user_id)
+
     @patch('tracker.views.publish_reels_task.delay')
     def test_user_publish_video_and_duplicate_prevention(self, mock_delay):
         self.client.force_authenticate(user=self.user1)

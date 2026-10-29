@@ -207,34 +207,38 @@ export const UserVideoPage: React.FC = () => {
     }
   }, [video?.id, video?.status]);
 
+  const [disconnecting, setDisconnecting] = useState(false);
+
   const handleConnectInstagram = async () => {
     try {
       setConnecting(true);
-      // 1. Tizimdagi tasdiqlangan Instagram tokeni orqali to'g'ridan-to'g'ri ulash
-      const res = await apiClient.post('/api/user/connect-instagram/');
-      if (res.data.status === 'connected') {
-        showToast(res.data.message || 'Instagram akkauntingiz muvaffaqiyatli ulandi!', 'success');
-        await refreshProfile();
-        return;
-      }
-      // 2. Agar to'g'ridan-to'g'ri ulanmasa, OAuth URL ga o'tish
-      if (res.data.auth_url) {
+      // Har bir foydalanuvchi o'zining shaxsiy/biznes akkauntini ulashi uchun OAuth havolasi olinadi
+      const res = await apiClient.get('/api/user/connect-instagram/');
+      if (res.data?.auth_url) {
         window.location.href = res.data.auth_url;
+      } else {
+        showToast("Instagram avtorizatsiya havolasini olib bo'lmadi", 'error');
       }
     } catch (err: any) {
-      try {
-        const getRes = await apiClient.get('/api/user/connect-instagram/');
-        if (getRes.data.status === 'connected') {
-          showToast('Instagram akkaunti ulangan!', 'success');
-          await refreshProfile();
-        } else if (getRes.data.auth_url) {
-          window.location.href = getRes.data.auth_url;
-        }
-      } catch (getErr: any) {
-        showToast(err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
-      }
+      showToast(err.response?.data?.error || err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleDisconnectInstagram = async () => {
+    if (!window.confirm("Instagram hisobingizni uzmoqchimisiz? Shundan so'ng yangi yoki boshqa biznes akkauntni qaytadan ulashingiz mumkin.")) {
+      return;
+    }
+    try {
+      setDisconnecting(true);
+      const res = await apiClient.post('/api/user/disconnect-instagram/');
+      showToast(res.data?.message || "Instagram hisobi uzildi. Endi yangi hisobingizni ulashingiz mumkin.", 'success');
+      await refreshProfile();
+    } catch (err: any) {
+      showToast(err.response?.data?.error || "Hisobni uzishda xatolik yuz berdi", 'error');
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -413,7 +417,17 @@ export const UserVideoPage: React.FC = () => {
           </div>
         </div>
 
-        {!isConnected && (
+        {isConnected ? (
+          <button
+            onClick={handleDisconnectInstagram}
+            disabled={disconnecting}
+            className="inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition border border-slate-700 shadow-sm disabled:opacity-50"
+            title="Hisobni uzib, boshqa Instagram biznes akkauntini ulash"
+          >
+            {disconnecting ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            <span>Boshqa akkauntga ulash</span>
+          </button>
+        ) : (
           <button
             onClick={handleConnectInstagram}
             disabled={connecting}

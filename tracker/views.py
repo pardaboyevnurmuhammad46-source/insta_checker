@@ -1062,73 +1062,86 @@ def user_connect_instagram(request):
         link.video = chosen_video
         link.save(update_fields=['video'])
 
-    # POST so'rovida to'g'ridan-to'g'ri bog'lash
-    if request.method == 'POST':
-        if ig_user.status == 'connected' and ig_user.access_token:
-            return Response({
-                "status": "connected",
-                "message": "Instagram hisobi allaqachon ulangan.",
-                "username": ig_user.name,
-                "ig_user_id": ig_user.ig_user_id,
-            })
+    # POST so'rovida to'g'ridan-to'g'ri bog'lash (faqat so'rov tanasida maxsus access_token berilganda)
+    custom_token = request.data.get('access_token') if (request.method == 'POST' and hasattr(request, 'data')) else None
+    is_mock_or_dry_run = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
 
-        custom_token = request.data.get('access_token') if hasattr(request, 'data') else None
-        token = custom_token or os.environ.get('INSTAGRAM_ACCESS_TOKEN') or getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '')
-        is_mock_or_dry_run = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
+    if request.method == 'POST' and custom_token:
+        try:
+            # Mock / DRY_RUN rejimda sinov ulanishi
+            if is_mock_or_dry_run:
+                ig_user.ig_user_id = ig_user.ig_user_id or '17841468563713006'
+                ig_user.name = ig_user.name if (ig_user.name and ig_user.name not in ('Instagram Foydalanuvchisi', 'Yangi Foydalanuvchi')) else (request.user.username or 'demo_user')
+                ig_user.access_token = custom_token or ig_user.access_token or 'demo_long_lived_token'
+                ig_user.status = 'connected'
+                ig_user.token_expires_at = timezone.now() + timedelta(days=60)
+                ig_user.save()
+                return Response({
+                    "status": "connected",
+                    "message": f"Instagram hisobi (@{ig_user.name}) muvaffaqiyatli ulandi!",
+                    "username": ig_user.name,
+                    "ig_user_id": ig_user.ig_user_id,
+                })
 
-        if token or is_mock_or_dry_run:
-            try:
-                # Mock / DRY_RUN rejimda sinov ulanishi
-                if is_mock_or_dry_run:
-                    ig_user.ig_user_id = ig_user.ig_user_id or '17841468563713006'
-                    ig_user.name = ig_user.name if (ig_user.name and ig_user.name not in ('Instagram Foydalanuvchisi', 'Yangi Foydalanuvchi')) else (request.user.username or 'demo_user')
-                    ig_user.access_token = token or ig_user.access_token or 'demo_long_lived_token'
-                    ig_user.status = 'connected'
-                    ig_user.token_expires_at = timezone.now() + timedelta(days=60)
-                    ig_user.save()
-                    return Response({
-                        "status": "connected",
-                        "message": f"Instagram hisobi (@{ig_user.name}) muvaffaqiyatli ulandi!",
-                        "username": ig_user.name,
-                        "ig_user_id": ig_user.ig_user_id,
-                    })
-
-                # Real rejim: Faqat Graph API orqali qat'iy tekshirilgan tokenga ruxsat beriladi
-                url = "https://graph.instagram.com/me"
-                params = {'fields': 'user_id,username,account_type', 'access_token': token}
-                res = requests.get(url, params=params, timeout=12)
-                if res.status_code == 200:
-                    data = res.json()
-                    ig_user.ig_user_id = str(data.get('user_id') or data.get('id') or '')
-                    ig_user.name = data.get('username') or ig_user.name
-                    ig_user.access_token = token
-                    ig_user.status = 'connected'
-                    ig_user.token_expires_at = timezone.now() + timedelta(days=60)
-                    ig_user.save()
-                    return Response({
-                        "status": "connected",
-                        "message": f"Instagram hisobi (@{ig_user.name}) muvaffaqiyatli ulandi!",
-                        "username": ig_user.name,
-                        "ig_user_id": ig_user.ig_user_id,
-                    })
-                else:
-                    return Response(
-                        {"error": "Instagram tokenni qabul qilmadi. Iltimos, qayta urinib ko'ring."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            except Exception as exc:
-                logger.error("Instagram bevosita ulashda xatolik: %s", str(exc))
+            # Real rejim: Faqat Graph API orqali qat'iy tekshirilgan tokenga ruxsat beriladi
+            url = "https://graph.instagram.com/me"
+            params = {'fields': 'user_id,username,account_type', 'access_token': custom_token}
+            res = requests.get(url, params=params, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                ig_user.ig_user_id = str(data.get('user_id') or data.get('id') or '')
+                ig_user.name = data.get('username') or ig_user.name
+                ig_user.access_token = custom_token
+                ig_user.status = 'connected'
+                ig_user.token_expires_at = timezone.now() + timedelta(days=60)
+                ig_user.save()
+                return Response({
+                    "status": "connected",
+                    "message": f"Instagram hisobi (@{ig_user.name}) muvaffaqiyatli ulandi!",
+                    "username": ig_user.name,
+                    "ig_user_id": ig_user.ig_user_id,
+                })
+            else:
                 return Response(
-                    {"error": f"Instagram bilan bog'lanishda xatolik: {str(exc)}"},
+                    {"error": "Instagram tokenni qabul qilmadi. Iltimos, qayta urinib ko'ring."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+        except Exception as exc:
+            logger.error("Instagram bevosita ulashda xatolik: %s", str(exc))
+            return Response(
+                {"error": f"Instagram bilan bog'lanishda xatolik: {str(exc)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     auth_url = build_instagram_auth_url(str(link.token))
     return Response({
         "auth_url": auth_url,
         "link_token": str(link.token),
         "status": ig_user.status,
-        "has_system_token": bool(getattr(settings, 'INSTAGRAM_ACCESS_TOKEN', '') or os.environ.get('INSTAGRAM_ACCESS_TOKEN', ''))
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def user_disconnect_instagram(request):
+    """
+    Foydalanuvchi o'zining bog'langan Instagram hisobini uzadi (unlink),
+    shunda u o'zining boshqa biznes akkauntini qayta ulashi mumkin bo'ladi.
+    """
+    ig_user = getattr(request.user, 'instagram_user', None)
+    if not ig_user:
+        return Response({"message": "Instagram hisobi topilmadi."}, status=status.HTTP_200_OK)
+
+    ig_user.status = 'pending'
+    ig_user.access_token = None
+    ig_user.token_expires_at = None
+    ig_user.ig_user_id = None
+    ig_user.name = request.user.username or "Instagram Foydalanuvchisi"
+    ig_user.save(update_fields=['status', 'access_token', 'token_expires_at', 'ig_user_id', 'name'])
+
+    return Response({
+        "status": "pending",
+        "message": "Instagram hisobingiz muvaffaqiyatli uzildi. Endi o'zingizning biznes akkauntingizni ulashingiz mumkin.",
     })
 
 
@@ -1148,6 +1161,10 @@ def instagram_auth_url(request):
     link = UniqueLink.objects.create(user=temp_user, video=chosen_video)
 
     auth_url = build_instagram_auth_url(str(link.token))
+
+    if request.GET.get('redirect') == '1' or ('text/html' in request.headers.get('accept', '') and not request.headers.get('x-requested-with')):
+        return HttpResponseRedirect(auth_url)
+
     return Response({
         "auth_url": auth_url,
         "link_token": str(link.token),

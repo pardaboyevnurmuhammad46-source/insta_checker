@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Lock, User, UserPlus, LogIn, Camera as Instagram, Eye, EyeOff, AlertTriangle } from 'lucide-react';
@@ -37,7 +38,15 @@ export const LoginPage: React.FC = () => {
       if (profile.role === 'admin') navigate('/admin-panel');
       else navigate('/app');
     } catch (err: any) {
-      showToast(err.response?.data?.detail || 'Xato', 'error');
+      const data = err.response?.data;
+      let msg = 'Tizimga kirishda xatolik yuz berdi';
+      if (data) {
+        if (typeof data === 'string') msg = data;
+        else if (data.detail) msg = data.detail;
+        else if (data.error) msg = data.error;
+        else if (data.non_field_errors) msg = Array.isArray(data.non_field_errors) ? data.non_field_errors.join(' ') : String(data.non_field_errors);
+      }
+      showToast(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -51,7 +60,33 @@ export const LoginPage: React.FC = () => {
       await register({ name: regName, username: regUsername, password: regPassword });
       navigate('/app/video');
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Xato', 'error');
+      const data = err.response?.data;
+      let msg = "Ro'yxatdan o'tishda xatolik yuz berdi";
+      if (data) {
+        if (typeof data === 'string') msg = data;
+        else if (data.error) msg = data.error;
+        else if (data.detail) msg = data.detail;
+        else if (data.password) msg = Array.isArray(data.password) ? data.password.join(' ') : String(data.password);
+        else if (data.username) msg = Array.isArray(data.username) ? data.username.join(' ') : String(data.username);
+        else if (data.name) msg = Array.isArray(data.name) ? data.name.join(' ') : String(data.name);
+      }
+      showToast(msg, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInstagramLogin = async () => {
+    try {
+      setLoading(true);
+      const res = await apiClient.get('/api/auth/instagram/url/');
+      if (res.data?.auth_url) {
+        window.location.href = res.data.auth_url;
+      } else {
+        showToast("Instagram avtorizatsiya havolasini olib bo'lmadi", 'error');
+      }
+    } catch {
+      showToast('Instagram havolasini olishda xatolik yuz berdi', 'error');
     } finally {
       setLoading(false);
     }
@@ -89,7 +124,12 @@ export const LoginPage: React.FC = () => {
             </button>
           </div>
 
-          <button onClick={() => window.location.href='http://127.0.0.1:8000/api/auth/instagram/url/'} className="w-full mb-6 bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition border border-slate-700">
+          <button
+            type="button"
+            onClick={handleInstagramLogin}
+            disabled={loading}
+            className="w-full mb-6 bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition border border-slate-700 disabled:opacity-50"
+          >
              <Instagram size={18} className="text-pink-400" />
              <span>Instagram orqali davom etish</span>
           </button>
