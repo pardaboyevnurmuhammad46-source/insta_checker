@@ -17,8 +17,13 @@ class Command(BaseCommand):
             'username_or_id',
             type=str,
             nargs='?',
+<<<<<<< HEAD
             default='nurmuhammad_pardaboyev',
             help="Foydalanuvchi nomi (username) yoki InstagramUser ID (standart: nurmuhammad_pardaboyev)",
+=======
+            default='nurmuhmmad_pardaboyev',
+            help="Foydalanuvchi nomi (username) yoki InstagramUser ID (standart: nurmuhmmad_pardaboyev)",
+>>>>>>> origin/messi
         )
         parser.add_argument(
             '--token',
@@ -69,6 +74,7 @@ class Command(BaseCommand):
             ig_user = InstagramUser.objects.filter(name__iexact=identifier).first()
 
         if not ig_user:
+<<<<<<< HEAD
             # Agar foydalanuvchi mavjud bo'lmasa, uni yaratamiz
             django_user = User.objects.filter(username__iexact=identifier).first()
             if not django_user:
@@ -82,6 +88,17 @@ class Command(BaseCommand):
                 user=django_user,
                 defaults={'name': django_user.get_full_name() or django_user.username}
             )
+=======
+            # Agar foydalanuvchi Django auth User sifatida mavjud bo'lsa, unga InstagramUser yaratamiz
+            django_user = User.objects.filter(username__iexact=identifier).first()
+            if django_user:
+                ig_user, _ = InstagramUser.objects.get_or_create(
+                    user=django_user,
+                    defaults={'name': django_user.get_full_name() or django_user.username}
+                )
+            else:
+                raise CommandError(f"Foydalanuvchi topilmadi: '{identifier}'")
+>>>>>>> origin/messi
 
         # 4. Foydalanuvchini ulash
         ig_user.ig_user_id = ig_user_id or ig_user.ig_user_id
