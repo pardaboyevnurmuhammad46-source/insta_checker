@@ -472,11 +472,8 @@ def admin_summary(request):
 dashboard_stats = admin_summary
 
 
-# ==========================================
-# User Statistika API lari (/api/me/...)
-# ==========================================
-
-@extend_schema(responses={200: MeSummarySerializer})
+# ===================================# User Statistika API lari (/api/me/...)
+# ============================@extend_schema(responses={200: MeSummarySerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me_summary(request):
@@ -676,10 +673,9 @@ def me_prizes(request):
     return paginator.get_paginated_response(serializer.data)
 
 
-# ==========================================
+# ===================================
 # Admin Statistika API lari (/api/admin/...)
-# ==========================================
-
+# ===================================
 @api_view(['GET'])
 @permission_classes([IsAdminRole])
 def admin_users_list(request):
@@ -1062,7 +1058,6 @@ def user_connect_instagram(request):
         link.video = chosen_video
         link.save(update_fields=['video'])
 
-<<<<<<< HEAD
     # POST so'rovida to'g'ridan-to'g'ri bog'lash (faqat so'rov tanasida maxsus access_token berilganda)
     custom_token = request.data.get('access_token') if (request.method == 'POST' and hasattr(request, 'data')) else None
     is_mock_or_dry_run = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
@@ -1109,63 +1104,6 @@ def user_connect_instagram(request):
                 )
         except Exception as exc:
             logger.error("Instagram bevosita ulashda xatolik: %s", str(exc))
-=======
-    # Agar POST orqali foydalanuvchi shaxsiy token yuborgan bo'lsa
-    if request.method == 'POST':
-        custom_token = (request.data.get('access_token') or '').strip() if hasattr(request, 'data') else ''
-        if not custom_token:
-            return Response(
-                {"error": "Iltimos, shaxsiy Instagram Access Tokeningizni kiriting yoki 'Instagram orqali ulash' tugmasidan foydalaning."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            # 1. Token ruxsatlarini tekshirish
-            from .services import verify_token_permissions, check_instagram_account_type
-            has_perms, missing = verify_token_permissions(custom_token)
-            if not has_perms:
-                return Response(
-                    {"error": f"Token ruxsatlari to'liq emas ({', '.join(missing)} yetishmayapti). Iltimos, publish, insights va comments ruxsatlariga ega tokenni kiriting."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            # 2. Akkaunt ma'lumotlarini olish
-            url = "https://graph.instagram.com/me"
-            params = {'fields': 'id,user_id,username,account_type', 'access_token': custom_token}
-            res = requests.get(url, params=params, timeout=12)
-            if res.status_code != 200:
-                return Response(
-                    {"error": f"Instagram tokenni qabul qilmadi (Status {res.status_code})."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            data = res.json()
-            ig_username = data.get('username')
-            ig_user_id = str(data.get('user_id') or data.get('id') or '')
-            acc_type = data.get('account_type', '').upper()
-
-            if acc_type == 'PERSONAL':
-                return Response(
-                    {"error": f"@{ig_username} shaxsiy akkaunt. Reels avtomatik joylash uchun hisobni Professional (Business yoki Creator) ga o'tkazing."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            ig_user.ig_user_id = ig_user_id or ig_user.ig_user_id
-            ig_user.name = ig_username or ig_user.name
-            ig_user.access_token = custom_token
-            ig_user.status = 'connected'
-            ig_user.token_expires_at = timezone.now() + timedelta(days=60)
-            ig_user.save()
-
-            return Response({
-                "status": "connected",
-                "message": f"Instagram akkauntingiz (@{ig_user.name}) muvaffaqiyatli ulandi!",
-                "username": ig_user.name,
-                "ig_user_id": ig_user.ig_user_id,
-            })
-        except Exception as exc:
-            logger.error("Instagram shaxsiy token ulashda xatolik: %s", str(exc))
->>>>>>> origin/messi
             return Response(
                 {"error": f"Instagram bilan bog'lanishda xatolik: {str(exc)}"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1176,7 +1114,6 @@ def user_connect_instagram(request):
         "auth_url": auth_url,
         "link_token": str(link.token),
         "status": ig_user.status,
-<<<<<<< HEAD
     })
 
 
@@ -1227,8 +1164,6 @@ def instagram_auth_url(request):
     return Response({
         "auth_url": auth_url,
         "link_token": str(link.token),
-=======
->>>>>>> origin/messi
     })
 
 
