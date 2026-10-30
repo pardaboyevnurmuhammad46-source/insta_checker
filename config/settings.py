@@ -18,8 +18,8 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file while preserving Docker container overrides
-docker_env = {k: os.environ[k] for k in ('DB_HOST', 'CELERY_BROKER_URL', 'CELERY_RESULT_BACKEND') if k in os.environ}
+# Load environment variables from .env file while preserving Docker container and shell overrides
+docker_env = {k: os.environ[k] for k in ('DB_HOST', 'CELERY_BROKER_URL', 'CELERY_RESULT_BACKEND', 'INSTAGRAM_MODE') if k in os.environ}
 load_dotenv(BASE_DIR / '.env', override=True)
 os.environ.update(docker_env)
 
@@ -269,12 +269,21 @@ INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LI
 CHECK_BATCH_SIZE = int(os.getenv('CHECK_BATCH_SIZE', '1000'))
 MAX_POSTS_PER_RUN = int(os.getenv('MAX_POSTS_PER_RUN', '50000'))
 
+# Adaptiv tekshiruv chastotalari (daqiqalarda)
+CHECK_INTERVAL_CLOSE_TO_PRIZE = int(os.getenv('CHECK_INTERVAL_CLOSE_TO_PRIZE', '15'))
+CHECK_INTERVAL_0_24H = int(os.getenv('CHECK_INTERVAL_0_24H', '30'))
+CHECK_INTERVAL_1_7D = int(os.getenv('CHECK_INTERVAL_1_7D', '180'))
+CHECK_INTERVAL_7_30D = int(os.getenv('CHECK_INTERVAL_7_30D', '720'))
+CHECK_INTERVAL_OLDER_30D = int(os.getenv('CHECK_INTERVAL_OLDER_30D', '1440'))
+
 # Instagram rejimi (faqat bitta sozlama bilan boshqariladi: real yoki mock, default: real)
 INSTAGRAM_MODE = os.getenv('INSTAGRAM_MODE', 'real').lower()
 if INSTAGRAM_MODE not in ('real', 'mock'):
     raise ValueError(f"Noto'g'ri INSTAGRAM_MODE: '{INSTAGRAM_MODE}'. Faqat 'real' yoki 'mock' bo'lishi mumkin.")
 INSTAGRAM_DRY_RUN = (INSTAGRAM_MODE == 'mock')
 DRY_RUN_PUBLISH_DELAY_SECONDS = float(os.getenv('DRY_RUN_PUBLISH_DELAY_SECONDS', '2.0'))
+DRY_RUN_API_DELAY_MIN = float(os.getenv('DRY_RUN_API_DELAY_MIN', '0.0'))
+DRY_RUN_API_DELAY_MAX = float(os.getenv('DRY_RUN_API_DELAY_MAX', '0.0'))
 
 # Instagram Reels yuklash usuli: "resumable" (Meta serveriga to'g'ridan-to'g'ri stream) yoki "url" (zaxira fallback)
 INSTAGRAM_UPLOAD_MODE = os.getenv('INSTAGRAM_UPLOAD_MODE', 'resumable').lower()

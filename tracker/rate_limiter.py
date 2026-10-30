@@ -17,12 +17,14 @@ logger = logging.getLogger(__name__)
 # ARGV[3]: Akkaunt sekundiga limiti
 # ARGV[4]: Akkaunt soatiga limiti
 # ARGV[5]: Noyob so'rov identifikatori (uuid)
+# ARGV[6]: Ushbu tranzaksiyadagi so'rovlar soni (requests_count)
 SLIDING_WINDOW_LUA = """
 local now = tonumber(ARGV[1])
 local global_limit = tonumber(ARGV[2])
 local account_sec_limit = tonumber(ARGV[3])
 local account_hour_limit = tonumber(ARGV[4])
 local unique_id = ARGV[5]
+local requests_count = tonumber(ARGV[6]) or 1
 
 -- 1. Instagram rate limit (backoff) mavjudligini tekshirish
 local is_throttled = redis.call('EXISTS', KEYS[2])
@@ -35,7 +37,7 @@ end
 local global_window_start = now - 1.0
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. global_window_start)
 local global_count = redis.call('ZCARD', KEYS[1])
-if global_count >= global_limit then
+if global_count + requests_count > global_limit then
     local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
     local retry_after = 1.0
     if oldest and #oldest >= 2 then
@@ -49,7 +51,7 @@ if KEYS[3] ~= '' and account_sec_limit > 0 then
     local acc_sec_start = now - 1.0
     redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', '(' .. acc_sec_start)
     local acc_sec_count = redis.call('ZCARD', KEYS[3])
-    if acc_sec_count >= account_sec_limit then
+    if acc_sec_count + requests_count > account_sec_limit then
         local oldest = redis.call('ZRANGE', KEYS[3], 0, 0, 'WITHSCORES')
         local retry_after = 1.0
         if oldest and #oldest >= 2 then
@@ -64,7 +66,7 @@ if KEYS[4] ~= '' and account_hour_limit > 0 then
     local acc_hour_start = now - 3600.0
     redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', '(' .. acc_hour_start)
     local acc_hour_count = redis.call('ZCARD', KEYS[4])
-    if acc_hour_count >= account_hour_limit then
+    if acc_hour_count + requests_count > account_hour_limit then
         local oldest = redis.call('ZRANGE', KEYS[4], 0, 0, 'WITHSCORES')
         local retry_after = 60.0
         if oldest and #oldest >= 2 then
@@ -75,16 +77,22 @@ if KEYS[4] ~= '' and account_hour_limit > 0 then
 end
 
 -- 5. Barcha chegaralardan muvaffaqiyatli o'tildi: barcha kalitlarga atomik yozish
-redis.call('ZADD', KEYS[1], now, unique_id)
-redis.call('EXPIRE', KEYS[1], 2)
-
-if KEYS[3] ~= '' and account_sec_limit > 0 then
-    redis.call('ZADD', KEYS[3], now, unique_id)
-    redis.call('EXPIRE', KEYS[3], 2)
+for i=1, requests_count do
+    local member_id = unique_id .. '_' .. tostring(i)
+    redis.call('ZADD', KEYS[1], now, member_id)
+    if KEYS[3] ~= '' and account_sec_limit > 0 then
+        redis.call('ZADD', KEYS[3], now, member_id)
+    end
+    if KEYS[4] ~= '' and account_hour_limit > 0 then
+        redis.call('ZADD', KEYS[4], now, member_id)
+    end
 end
 
+redis.call('EXPIRE', KEYS[1], 2)
+if KEYS[3] ~= '' and account_sec_limit > 0 then
+    redis.call('EXPIRE', KEYS[3], 2)
+end
 if KEYS[4] ~= '' and account_hour_limit > 0 then
-    redis.call('ZADD', KEYS[4], now, unique_id)
     redis.call('EXPIRE', KEYS[4], 3610)
 end
 
@@ -120,7 +128,7 @@ class InstagramRateLimiter:
             self._script = r.register_script(SLIDING_WINDOW_LUA)
         return self._script
 
-    def acquire(self, account_id: str | int | None = None) -> tuple[bool, float, str]:
+    def acquire(self, account_id: str | int | None = None, requests_count: int = 1) -> tuple[bool, float, str]:
         """
         Instagram API ga so'rov yuborishdan oldin ruxsat so'raydi.
         Qaytaradi: (allowed, retry_after_seconds, reason)
@@ -142,7 +150,7 @@ class InstagramRateLimiter:
             script = self._get_script()
             result = script(
                 keys=[global_key, throttle_key, acc_sec_key, acc_hour_key],
-                args=[now, global_limit, account_sec_limit, account_hour_limit, unique_id],
+                args=[now, global_limit, account_sec_limit, account_hour_limit, unique_id, requests_count],
             )
             # result: [allowed_int, retry_after_str, reason_str]
             allowed = bool(result[0] == 1)

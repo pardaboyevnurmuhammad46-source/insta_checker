@@ -215,30 +215,20 @@ export const UserVideoPage: React.FC = () => {
   const handleConnectInstagram = async () => {
     try {
       setConnecting(true);
-<<<<<<< HEAD
       // Har bir foydalanuvchi o'zining shaxsiy/biznes akkauntini ulashi uchun OAuth havolasi olinadi
       const res = await apiClient.get('/api/user/connect-instagram/');
       if (res.data?.auth_url) {
-=======
-      const res = await apiClient.get('/api/user/connect-instagram/');
-      if (res.data.auth_url) {
->>>>>>> origin/messi
         window.location.href = res.data.auth_url;
       } else {
         showToast("Instagram avtorizatsiya havolasini olib bo'lmadi", 'error');
       }
     } catch (err: any) {
-<<<<<<< HEAD
       showToast(err.response?.data?.error || err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
-=======
-      showToast(err.detail || 'Instagramga ulanishda xatolik yuz berdi', 'error');
->>>>>>> origin/messi
     } finally {
       setConnecting(false);
     }
   };
 
-<<<<<<< HEAD
   const handleDisconnectInstagram = async () => {
     if (!window.confirm("Instagram hisobingizni uzmoqchimisiz? Shundan so'ng yangi yoki boshqa biznes akkauntni qaytadan ulashingiz mumkin.")) {
       return;
@@ -252,7 +242,9 @@ export const UserVideoPage: React.FC = () => {
       showToast(err.response?.data?.error || "Hisobni uzishda xatolik yuz berdi", 'error');
     } finally {
       setDisconnecting(false);
-=======
+    }
+  };
+
   const handleConnectWithToken = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customTokenInput.trim()) return;
@@ -269,7 +261,6 @@ export const UserVideoPage: React.FC = () => {
       showToast(err.detail || err.error || 'Tokenni tekshirishda xatolik yuz berdi', 'error');
     } finally {
       setConnectingToken(false);
->>>>>>> origin/messi
     }
   };
 
@@ -448,7 +439,7 @@ export const UserVideoPage: React.FC = () => {
           </div>
         </div>
 
-<<<<<<< HEAD
+
         {isConnected ? (
           <button
             onClick={handleDisconnectInstagram}
@@ -460,16 +451,6 @@ export const UserVideoPage: React.FC = () => {
             <span>Boshqa akkauntga ulash</span>
           </button>
         ) : (
-          <button
-            onClick={handleConnectInstagram}
-            disabled={connecting}
-            className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition shadow-md disabled:opacity-50"
-          >
-            {connecting ? <Loader2 size={16} className="animate-spin" /> : <Instagram size={16} />}
-            <span>Instagramga ulash</span>
-          </button>
-=======
-        {!isConnected && (
           <div className="flex flex-col sm:flex-row items-center gap-2">
             <button
               onClick={handleConnectInstagram}
@@ -486,7 +467,6 @@ export const UserVideoPage: React.FC = () => {
               Token orqali ulash
             </button>
           </div>
->>>>>>> origin/messi
         )}
       </div>
 

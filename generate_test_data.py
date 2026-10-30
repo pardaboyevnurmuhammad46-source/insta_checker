@@ -270,5 +270,158 @@ def generate_demo_data():
     print("=" * 50)
 
 
+def generate_benchmark_data(num_users: int = 1000, clear_existing: bool = False):
+    """
+    3-bosqich tezlikni o'lchash (benchmark) uchun sintetik ma'lumotlar yaratadi.
+    Xavfsizlik: Faqat INSTAGRAM_MODE='mock' yoki INSTAGRAM_DRY_RUN=True rejimida ishlaydi.
+    Har bir user uchun IGAA... sintetik token va 1-3 ta tekshirishga tayyor (due) post yaratiladi.
+    """
+    from django.conf import settings
+    import uuid
+    import random
+    from tracker.models import generate_unique_link_code
+
+    is_mock = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
+    if not is_mock:
+        raise ValueError(
+            "Xavfsizlik xatosi: Benchmark ma'lumotlarini yaratish faqat INSTAGRAM_MODE='mock' "
+            "yoki INSTAGRAM_DRY_RUN=True rejimida ruxsat etiladi! Haqiqiy Instagram rejimida sinov ma'lumotlari yaratilmaydi."
+        )
+
+    print(f"\n[BENCHMARK] {num_users} ta foydalanuvchi uchun sinov ma'lumotlarini yaratish boshlandi...")
+
+    if clear_existing:
+        print("[BENCHMARK] Eski benchmark ma'lumotlari o'chirilmoqda...")
+        benchmark_users = InstagramUser.objects.filter(name__startswith="Benchmark User ")
+        deleted_count, _ = benchmark_users.delete()
+        print(f"[BENCHMARK] {deleted_count} ta eski yozuv tozalandi.")
+
+    default_video, _ = Video.objects.get_or_create(
+        title="Rasmiy Promo Video (Default)",
+        is_default=True,
+        defaults={"is_active": True}
+    )
+    if not default_video.file:
+        default_video.file.save("default_promo.mp4", ContentFile(b"fake_mp4_video_content_data"))
+        default_video.save()
+
+    now = timezone.now()
+    batch_size = 2000
+
+    # 1. InstagramUser yaratish (bulk_create)
+    print(f"[BENCHMARK] {num_users} ta InstagramUser yaratilmoqda...")
+    users_to_create = []
+    base_id = int(timezone.now().timestamp())
+    for i in range(1, num_users + 1):
+        u = InstagramUser(
+            name=f"Benchmark User {i}",
+            ig_user_id=f"1784149{base_id % 100000:05d}{i:05d}",
+            access_token=f"IGAABenchmarkToken_{i}_{uuid.uuid4().hex[:12]}",
+            token_expires_at=now + timedelta(days=60),
+            status="connected",
+        )
+        users_to_create.append(u)
+        if len(users_to_create) >= batch_size:
+            InstagramUser.objects.bulk_create(users_to_create)
+            users_to_create = []
+
+    if users_to_create:
+        InstagramUser.objects.bulk_create(users_to_create)
+
+    # Yaratilgan userlarni to'g'ridan-to'g'ri sanash (agar num_users > 0 bo'lsa)
+    created_users = []
+    if num_users > 0:
+        created_users = list(
+            InstagramUser.objects.filter(name__startswith="Benchmark User ").order_by('-id')[:num_users]
+        )
+
+    # 2. UniqueLink lar yaratish (har userga 1-3 ta)
+    print(f"[BENCHMARK] Har bir userga 1-3 tadan UniqueLink yaratilmoqda...")
+    links_to_create = []
+    for u in created_users:
+        posts_count = random.randint(1, 3)
+        for _ in range(posts_count):
+            links_to_create.append(
+                UniqueLink(
+                    user=u,
+                    video=default_video,
+                    status="posted",
+                    code=generate_unique_link_code(),
+                )
+            )
+            if len(links_to_create) >= batch_size:
+                UniqueLink.objects.bulk_create(links_to_create)
+                links_to_create = []
+
+    if links_to_create:
+        UniqueLink.objects.bulk_create(links_to_create)
+
+    created_links = list(
+        UniqueLink.objects.filter(user__in=created_users).order_by('id')
+    )
+
+    # 3. Post lar yaratish (har link uchun 1 ta)
+    import json
+    from tracker.instagram_errors import get_redis_client
+    r = get_redis_client()
+
+    print(f"[BENCHMARK] {len(created_links)} ta Post yaratilmoqda...")
+    posts_to_create = []
+    post_idx = 1
+    
+    # Redis'ga user postlari xaritasini saqlash
+    user_media_map = {}
+
+    for link in created_links:
+        ig_media_id = f"18999{base_id % 10000:04d}{post_idx:07d}"
+        posts_to_create.append(
+            Post(
+                link=link,
+                ig_media_id=ig_media_id,
+                status="published",
+                views=random.randint(50, 480),
+                likes=random.randint(5, 45),
+                comments_count=random.randint(1, 10),
+                posted_at=now - timedelta(hours=random.randint(1, 48)),
+                last_checked_at=now - timedelta(minutes=random.randint(10, 120)),
+                next_check_at=now - timedelta(seconds=random.randint(5, 300)), # o'tmishda, darhol due
+            )
+        )
+        post_idx += 1
+        
+        # Redis xaritasiga qo'shish
+        user_media_map.setdefault(link.user.access_token, []).append(ig_media_id)
+        
+        if len(posts_to_create) >= batch_size:
+            Post.objects.bulk_create(posts_to_create)
+            posts_to_create = []
+
+    if posts_to_create:
+        Post.objects.bulk_create(posts_to_create)
+
+    # Redis'ga bitta pipeline'da yozish
+    pipe = r.pipeline()
+    for token, media_ids in user_media_map.items():
+        pipe.set(f"dry_run:sim:token_media:{token}", json.dumps(media_ids), ex=86400)
+    pipe.execute()
+
+    total_posts = Post.objects.filter(link__user__in=created_users).count()
+    print(f"[BENCHMARK] Muvaffaqiyatli yakunlandi! Jami: {len(created_users)} ta user va {total_posts} ta post yaratildi.")
+    print("=" * 50)
+
+
 if __name__ == '__main__':
-    generate_demo_data()
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(description="InstaChecker test va benchmark ma'lumotlarini yaratish")
+    parser.add_argument('--benchmark', action='store_true', help="3-bosqich benchmark uchun sintetik ma'lumotlar yaratish")
+    parser.add_argument('--users', type=int, default=1000, help="Benchmark uchun yaratiladigan userlar soni (default: 1000)")
+    parser.add_argument('--clear', action='store_true', help="Eski benchmark userlarini tozalash")
+
+    args = parser.parse_args()
+
+    if args.benchmark:
+        generate_benchmark_data(num_users=args.users, clear_existing=args.clear)
+    else:
+        generate_demo_data()

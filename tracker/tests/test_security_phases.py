@@ -1033,21 +1033,21 @@ class Phase5StatsEngineTestCase(TestCase):
     def test_adaptive_interval_logic(self):
         now = timezone.now()
         
-        # 0-24 soat -> 5 daqiqa
+        # 0-24 soat -> 30 daqiqa
         self.post.posted_at = now - timedelta(hours=2)
         next_check = calculate_next_check(self.post, now=now)
-        self.assertEqual(next_check, now + timedelta(minutes=5))
+        self.assertEqual(next_check, now + timedelta(minutes=30))
         
-        # 1-7 kun -> 10 daqiqa
+        # 1-7 kun -> 3 soat
         self.post.posted_at = now - timedelta(days=2)
         next_check = calculate_next_check(self.post, now=now)
-        self.assertEqual(next_check, now + timedelta(minutes=10))
+        self.assertEqual(next_check, now + timedelta(hours=3))
 
-        # Milestone 80% logic (500 * 0.8 = 400) -> 5 daqiqa
+        # Milestone 80% logic (500 * 0.8 = 400) -> 15 daqiqa
         self.post.posted_at = now - timedelta(days=10) # 7 kundan eski, lekin marraga yaqin
         self.post.views = 410
         next_check = calculate_next_check(self.post, now=now)
-        self.assertEqual(next_check, now + timedelta(minutes=5))
+        self.assertEqual(next_check, now + timedelta(minutes=15))
 
 
 class Phase6StatsApiTestCase(TestCase):

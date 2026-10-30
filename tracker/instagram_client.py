@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import json
 import logging
+import random
 import time
 import urllib.parse
 import uuid
@@ -116,7 +117,7 @@ class InstagramClient(ABC):
         pass
 
     @abstractmethod
-    def list_recent_media(self, access_token: str, limit: int = 25) -> list[dict]:
+    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False) -> list[dict] | tuple[list[dict], bool]:
         """Oxirgi medialar ro'yxatini oladi (maksimum 4 sahifa)."""
         pass
 
@@ -475,8 +476,8 @@ class RealInstagramClient(InstagramClient):
             'views': int(views or 0),
         }
 
-    def list_recent_media(self, access_token: str, limit: int = 25) -> list[dict]:
-        return list_recent_media(token=access_token, limit=limit)
+    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False) -> list[dict] | tuple[list[dict], bool]:
+        return list_recent_media(token=access_token, limit=limit, return_paging_info=return_paging_info)
 
     def get_media_insights(self, access_token: str, media_id: str) -> dict:
         return get_media_insights(token=access_token, media_id=media_id)
@@ -554,8 +555,18 @@ class DryRunInstagramClient(InstagramClient):
     def get_media_permalink(self, ig_media_id: str, access_token: str) -> str:
         return f"https://www.instagram.com/reel/{ig_media_id}/"
 
+    def _apply_simulated_delay(self):
+        delay_min = float(getattr(settings, 'DRY_RUN_API_DELAY_MIN', 0.0))
+        delay_max = float(getattr(settings, 'DRY_RUN_API_DELAY_MAX', 0.0))
+        if delay_max > 0:
+            delay = random.uniform(delay_min, delay_max)
+            if delay > 0:
+                time.sleep(delay)
+
     def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
+        self._apply_simulated_delay()
         r = get_redis_client()
+        r.incr("dry_run:sim:counters:fetch_post_metrics")
 
         # 1. Post darajasidagi simulyatsiya qilingan xatoliklar
         if post_id is not None:
@@ -623,28 +634,87 @@ class DryRunInstagramClient(InstagramClient):
             "comments_count": 5,
         }
 
-    def list_recent_media(self, access_token: str, limit: int = 25) -> list[dict]:
+    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False) -> list[dict] | tuple[list[dict], bool]:
+        self._apply_simulated_delay()
         r = get_redis_client()
+        r.incr("dry_run:sim:counters:list_recent_media")
+        
         if access_token:
             tok_err = r.get(f"dry_run:sim:token:{access_token}:error")
             if tok_err and str(tok_err) == "token_invalid":
                 record_instagram_error(InstagramErrorType.TOKEN_INVALID)
                 raise TokenInvalid("Token yaroqsiz (simulyatsiya)", error_code=190, error_subcode=463)
-        return []
+
+        media_list = []
+        try:
+            cached_media_ids_raw = r.get(f"dry_run:sim:token_media:{access_token}")
+            if cached_media_ids_raw:
+                media_ids = json.loads(cached_media_ids_raw)
+                for mid in media_ids:
+                    media_list.append({
+                        'id': mid,
+                        'like_count': 35,
+                        'comments_count': 5,
+                        'media_type': 'VIDEO',
+                        'media_product_type': 'REELS',
+                        'permalink': f"https://www.instagram.com/reel/{mid}/",
+                    })
+            else:
+                # Benchmark emas, boshqa testlar uchun DB zaxirasi
+                from .models import Post, InstagramUser
+                user = InstagramUser.objects.filter(access_token=access_token).first()
+                if user:
+                    posts = Post.objects.filter(link__user=user).exclude(status='deleted')
+                    for p in posts:
+                        err = r.get(f"dry_run:sim:post:{p.id}:error")
+                        if err and str(err) == "media_not_found":
+                            continue
+                        media_list.append({
+                            'id': p.ig_media_id,
+                            'like_count': p.likes + 2,
+                            'comments_count': p.comments_count + 1,
+                            'media_type': 'VIDEO',
+                            'media_product_type': 'REELS',
+                            'permalink': f"https://www.instagram.com/reel/{p.ig_media_id}/",
+                        })
+        except Exception as exc:
+            logger.error("Simulyatsiya list_recent_media xatoligi: %s", exc)
+            pass
+
+        if return_paging_info:
+            return media_list, True
+        return media_list
 
     def get_media_insights(self, access_token: str, media_id: str) -> dict:
+        self._apply_simulated_delay()
         r = get_redis_client()
+        r.incr("dry_run:sim:counters:get_media_insights")
+        
         if access_token:
             tok_err = r.get(f"dry_run:sim:token:{access_token}:error")
             if tok_err and str(tok_err) == "token_invalid":
                 record_instagram_error(InstagramErrorType.TOKEN_INVALID)
                 raise TokenInvalid("Token yaroqsiz (simulyatsiya)", error_code=190, error_subcode=463)
+
+        sim_views = 250
+        try:
+            from .models import Post
+            post = Post.objects.filter(ig_media_id=media_id).first()
+            if post:
+                sim_views_key = r.get(f"dry_run:sim:post:{post.id}:views")
+                if sim_views_key:
+                    sim_views = int(sim_views_key)
+                else:
+                    sim_views = max(post.views + 50, 250)
+        except Exception:
+            pass
+
         return {
-            'views': 250,
-            'reach': 200,
-            'likes': 25,
-            'comments': 5,
-            'comments_count': 5,
+            'views': sim_views,
+            'reach': int(sim_views * 0.8),
+            'likes': max(1, sim_views // 10),
+            'comments': max(0, sim_views // 50),
+            'comments_count': max(0, sim_views // 50),
             'shares': 3,
             'saved': 2,
             'raw': {'data': []},
@@ -726,7 +796,7 @@ def _check_instagram_response(response: requests.Response, operation: str = "api
     return data
 
 
-def list_recent_media(token: str, limit: int = 25) -> list[dict]:
+def list_recent_media(token: str, limit: int = 25, return_paging_info: bool = False) -> list[dict] | tuple[list[dict], bool]:
     """
     Foydalanuvchining so'nggi medialarini (Reels/postlar) oladi.
     GET https://graph.instagram.com/me/media?fields=id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,thumbnail_url
@@ -748,6 +818,7 @@ def list_recent_media(token: str, limit: int = 25) -> list[dict]:
     current_params = params
     max_pages = 4
     pages_fetched = 0
+    pagination_completed = True
 
     while current_url and pages_fetched < max_pages:
         try:
@@ -770,10 +841,16 @@ def list_recent_media(token: str, limit: int = 25) -> list[dict]:
         paging = data.get('paging', {})
         next_url = paging.get('next') if isinstance(paging, dict) else None
         if not next_url:
+            pagination_completed = True
             break
         current_url = next_url
         current_params = None
+    else:
+        if current_url:
+            pagination_completed = False
 
+    if return_paging_info:
+        return all_media, pagination_completed
     return all_media
 
 

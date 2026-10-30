@@ -75,6 +75,7 @@ def refresh_user_token(user: InstagramUser) -> bool:
         return False
 
     try:
+        was_disconnected = user.status != 'connected'
         data = refresh_instagram_access_token(user.access_token)
         new_token = data.get('access_token')
         expires_in = data.get('expires_in', 5184000)
@@ -83,6 +84,15 @@ def refresh_user_token(user: InstagramUser) -> bool:
         user.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
         user.status = 'connected'
         user.save(update_fields=['access_token', 'token_expires_at', 'status'])
+        
+        if was_disconnected:
+            posts_to_restore = Post.objects.filter(link__user=user, status__in=('published', 'verified'), next_check_at__isnull=True)
+            now_time = timezone.now()
+            for p in posts_to_restore:
+                p.next_check_at = now_time + timedelta(minutes=5)
+            if posts_to_restore:
+                Post.objects.bulk_update(posts_to_restore, ['next_check_at'])
+                
         logger.info("InstagramUser token yangilandi: user_id=%s", user.id)
         return True
     except InstagramNetworkError as exc:
@@ -167,6 +177,8 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
         pass
 
     user = link.user
+    was_disconnected = user.status != 'connected'
+
     user.ig_user_id = ig_user_id or user.ig_user_id
     if ig_username:
         user.name = ig_username
@@ -174,6 +186,15 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
     user.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
     user.status = 'connected'
     user.save(update_fields=['ig_user_id', 'name', 'access_token', 'token_expires_at', 'status'])
+
+    # Agar user oldin uzilgan/xato holatida bo'lgan bo'lsa, uning to'xtatilgan postlarini qayta tiklaymiz
+    if was_disconnected:
+        posts_to_restore = Post.objects.filter(link__user=user, status__in=('published', 'verified'), next_check_at__isnull=True)
+        now_time = timezone.now()
+        for p in posts_to_restore:
+            p.next_check_at = now_time + timedelta(minutes=5)
+        if posts_to_restore:
+            Post.objects.bulk_update(posts_to_restore, ['next_check_at'])
 
     if link.status == 'pending':
         link.status = 'opened'
@@ -499,17 +520,52 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
 
 def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     """
-    Post yoshiga va prizga yaqinligiga qarab keyingi tekshirish vaqtini adaptiv hisoblaydi:
-    - 0-24 soat: 5 daqiqa
-    - 1-7 kun: 10 daqiqa
-    - 7 kundan eski: 60 daqiqa
-    - ko'rishlar keyingi marraning 80% iga yetgan bo'lsa: 5 daqiqa
+    1 000 000 post miqyosiga moslashtirilgan ilmiy adaptiv chastota:
+    - O'chirilgan, rad etilgan yoki tokeni yaroqsiz postlar: None (tekshirilmaydi)
+    - Views >= 5000 bo'lgan yoki barcha asosiy sovrinlari olingan postlar: 24 soat
+    - Keyingi sovrin marrasiga juda yaqin (>=80%): 15 daqiqa
+    - 0-24 soatlik yangi postlar: 30 daqiqa
+    - 1-7 kunlik faol postlar: 3 soat
+    - 7-30 kunlik postlar: 12 soat
+    - 30 kundan eski postlar: 24 soat
     """
     if post.status not in ('published', 'verified'):
         return None
 
+    # Foydalanuvchi tokeni yaroqsiz (needs_reauth) bo'lsa tekshirmaymiz
+    if post.link and post.link.user and post.link.user.status in ('needs_reauth', 'revoked', 'disconnected'):
+        return None
+
     if now is None:
         now = timezone.now()
+
+    # 1. Agar post views >= 5000 bo'lsa (yirik marraga yetgan, sekin o'suvchi): 24 soat
+    if post.views >= 5000:
+        return now + timedelta(hours=24)
+
+    # Keyingi marrani aniqlash
+    milestones = get_configured_milestones()
+    awarded_milestones = []
+    if post.pk:
+        # DB so'rovning oldini olish (N+1 xatoligi), prefetch qilingan xotiradan foydalanamiz
+        if hasattr(post, '_prefetched_objects_cache') and 'prizes' in post._prefetched_objects_cache:
+            awarded_milestones = [p.milestone for p in post.prizes.all()]
+        else:
+            awarded_milestones = list(post.prizes.values_list('milestone', flat=True))
+            
+    next_milestone = None
+    for m in sorted(milestones):
+        if m not in awarded_milestones:
+            next_milestone = m
+            break
+
+    # 2. Agar barcha marralar olingan bo'lsa: 24 soat
+    if not next_milestone:
+        return now + timedelta(hours=24)
+
+    # 3. Prizga yaqinlashgan postlar (>=80% va hali olinmagan): har 15 daqiqada
+    if next_milestone and post.views >= (next_milestone * 0.8):
+        return now + timedelta(minutes=15)
 
     post_time = post.posted_at or post.last_synced_at or post.last_checked_at
     if not post_time and post.link:
@@ -517,25 +573,15 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     if not post_time:
         post_time = now
 
-    # Prizga yaqinlikni tekshirish (keyingi marraning 80% iga yetgan bo'lsa -> 5 daqiqa)
-    milestones = get_configured_milestones()
-    awarded_milestones = list(post.prizes.values_list('milestone', flat=True))
-    next_milestone = None
-    for m in sorted(milestones):
-        if m not in awarded_milestones:
-            next_milestone = m
-            break
-
-    if next_milestone and post.views >= (next_milestone * 0.8):
-        return now + timedelta(minutes=5)
-
     age = now - post_time
     if age < timedelta(days=1):  # 0-24 soat
-        return now + timedelta(minutes=5)
+        return now + timedelta(minutes=30)
     elif age < timedelta(days=7):  # 1-7 kun
-        return now + timedelta(minutes=10)
-    else:  # 7 kundan eski
-        return now + timedelta(minutes=60)
+        return now + timedelta(hours=3)
+    elif age < timedelta(days=30):  # 7-30 kun
+        return now + timedelta(hours=12)
+    else:  # 30 kundan eski
+        return now + timedelta(hours=24)
 
 
 def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
@@ -639,6 +685,19 @@ def bulk_save_posts_metrics(
     }
 
 
+def is_simulated_mode(token: str | None) -> bool:
+    """
+    Faqat mock/dry-run rejimida VA demo/test/fake prefiksli tokenlar uchun True qaytaradi.
+    Mock rejimning o'zi True qaytarmaydi (IGAA.../EAAB... tokenli userlar mock rejimda ham
+    chetlab o'tishga tushmay, to'g'ri DryRunInstagramClient orqali to'liq oqimdan o'tadi).
+    Real rejimda esa har qanday token to'g'ridan-to'g'ri Graph API ga yo'naltiriladi.
+    """
+    if not token:
+        return False
+    is_mock = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
+    return is_mock and token.startswith(('demo_', 'test_', 'fake_'))
+
+
 def update_post_metrics(post: Post) -> Post:
     """
     Post statistikasini Instagram'dan tortib oladi, bazani yangilaydi va sovrinlarni tekshiradi.
@@ -650,8 +709,8 @@ def update_post_metrics(post: Post) -> Post:
         post.save(update_fields=['error', 'next_check_at'])
         return post
 
-    # Demo yoki sinov tokeni bo'lsa, mavjud metrikalarni saqlaymiz va Graph API xatoligi bilan needs_reauth bo'lishini oldini olamiz
-    if user.access_token.startswith(('demo_', 'test_', 'fake_')) or getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock':
+    # Faqat mock rejimida va demo/test tokenlari bo'lsa chetlab o'tiladi
+    if is_simulated_mode(user.access_token):
         post.last_checked_at = timezone.now()
         post.next_check_at = calculate_next_check(post)
         post.save(update_fields=['last_checked_at', 'next_check_at'])
@@ -901,7 +960,7 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
     token = instagram_user.access_token
 
     # Demo yoki sinov tokeni bo'lsa, statusni 'connected' holatida saqlaymiz va soxta xato chiqarmaymiz
-    if token.startswith(('demo_', 'test_', 'fake_')) or getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock':
+    if is_simulated_mode(token):
         return {'status': 'success', 'synced': 0, 'is_demo': True}
 
     try:

@@ -1,9 +1,15 @@
 from unittest.mock import patch
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from datetime import timedelta
 from tracker.models import InstagramUser, UniqueLink, Post, PostStat, Prize, Video
-from tracker.services import update_post_metrics, bulk_save_posts_metrics, check_and_award_prizes
+from tracker.services import (
+    update_post_metrics,
+    bulk_save_posts_metrics,
+    check_and_award_prizes,
+    is_simulated_mode,
+)
+from tracker.instagram_client import RealInstagramClient, DryRunInstagramClient
 
 
 class BulkAndStatsTestCase(TestCase):
@@ -11,7 +17,7 @@ class BulkAndStatsTestCase(TestCase):
         self.user = InstagramUser.objects.create(
             name="Test User",
             ig_user_id="12345678",
-            access_token="tok_real_simulation_123",
+            access_token="IGAATestToken1234567890",
             status="connected",
         )
         self.video = Video.objects.create(title="Test Video", is_default=True)
@@ -125,3 +131,59 @@ class BulkAndStatsTestCase(TestCase):
         self.assertEqual(post3.views, 1050)
         self.assertTrue(Prize.objects.filter(post=post3, milestone=500).exists())
         self.assertTrue(Prize.objects.filter(post=post3, milestone=1000).exists())
+
+    # =========================================================================
+    # Simulyatsiya va Rejim tekshiruvlari: (a), (b), (c), (d)
+    # =========================================================================
+
+    @override_settings(INSTAGRAM_MODE='real', INSTAGRAM_DRY_RUN=False)
+    @patch.object(RealInstagramClient, 'fetch_post_metrics')
+    def test_real_mode_with_igaa_token_reaches_real_client(self, mock_real_fetch):
+        """(a) real rejim + IGAA token: Haqiqiy Graph API klientiga boradi."""
+        mock_real_fetch.return_value = {'views': 200, 'likes': 20, 'comments_count': 3}
+        self.user.access_token = "IGAARealUserToken12345"
+        self.user.save()
+
+        update_post_metrics(self.post)
+        self.assertTrue(mock_real_fetch.called)
+
+    @override_settings(INSTAGRAM_MODE='real', INSTAGRAM_DRY_RUN=False)
+    @patch.object(RealInstagramClient, 'fetch_post_metrics')
+    def test_real_mode_with_test_token_does_not_bypass(self, mock_real_fetch):
+        """(b) real rejim + test_ token: chetlab o'tmaydi (production xavfsizligi, Graph API ga boradi)."""
+        mock_real_fetch.return_value = {'views': 200, 'likes': 20, 'comments_count': 3}
+        self.user.access_token = "test_accidental_token_in_prod"
+        self.user.save()
+
+        # is_simulated_mode real rejimda har doim False bo'lishi kerak:
+        self.assertFalse(is_simulated_mode(self.user.access_token))
+
+        update_post_metrics(self.post)
+        # Productionda Graph API klientiga chaqiruv ketishi shart:
+        self.assertTrue(mock_real_fetch.called)
+
+    @override_settings(INSTAGRAM_MODE='mock', INSTAGRAM_DRY_RUN=True, DEBUG=True)
+    @patch.object(DryRunInstagramClient, 'fetch_post_metrics')
+    def test_mock_mode_with_igaa_token_passes_through_dry_run_client(self, mock_dry_fetch):
+        """(c) mock rejim + IGAA token: DryRunInstagramClient orqali o'tadi, chetlab o'tmaydi."""
+        mock_dry_fetch.return_value = {'views': 300, 'likes': 30, 'comments_count': 5}
+        self.user.access_token = "IGAABenchmarkToken999"
+        self.user.save()
+
+        self.assertFalse(is_simulated_mode(self.user.access_token))
+
+        update_post_metrics(self.post)
+        self.assertTrue(mock_dry_fetch.called)
+
+    @override_settings(INSTAGRAM_MODE='mock', INSTAGRAM_DRY_RUN=True, DEBUG=True)
+    @patch.object(DryRunInstagramClient, 'fetch_post_metrics')
+    def test_mock_mode_with_demo_token_bypasses(self, mock_dry_fetch):
+        """(d) mock rejim + demo_ token: chetlab o'tadi (DryRunInstagramClient chaqirilmaydi)."""
+        self.user.access_token = "demo_long_lived_token_bekzod"
+        self.user.save()
+
+        self.assertTrue(is_simulated_mode(self.user.access_token))
+
+        update_post_metrics(self.post)
+        # Klient chaqirilmasdan to'g'ridan-to'g'ri qaytadi:
+        self.assertFalse(mock_dry_fetch.called)

@@ -329,30 +329,30 @@ class AdaptiveScheduleTestCase(TestCase):
     def test_adaptive_intervals(self):
         base_now = timezone.now()
 
-        # 0 dan 24 soatgacha -> 5 daqiqa
+        # 0 dan 24 soatgacha -> 30 daqiqa
         self.post.posted_at = base_now - timedelta(hours=2)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(minutes=5))
+        self.assertEqual(next_check, base_now + timedelta(minutes=30))
 
         self.post.posted_at = base_now - timedelta(hours=23)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(minutes=5))
+        self.assertEqual(next_check, base_now + timedelta(minutes=30))
 
-        # 1 kundan 7 kungacha -> 10 daqiqa
+        # 1 kundan 7 kungacha -> 3 soat
         self.post.posted_at = base_now - timedelta(days=3)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(minutes=10))
+        self.assertEqual(next_check, base_now + timedelta(hours=3))
 
-        # 7 kundan eski -> 60 daqiqa
+        # 7 kundan 30 kungacha -> 12 soat
         self.post.posted_at = base_now - timedelta(days=10)
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(minutes=60))
+        self.assertEqual(next_check, base_now + timedelta(hours=12))
 
-        # Ko'rishlar keyingi marraning 80% iga yetgan bo'lsa -> 5 daqiqa (hatto 7 kundan eski bo'lsa ham)
+        # Ko'rishlar keyingi marraning 80% iga yetgan bo'lsa -> 15 daqiqa (hatto 7 kundan eski bo'lsa ham)
         self.post.posted_at = base_now - timedelta(days=15)
         self.post.views = 450  # 500 ning 80% = 400
         next_check = calculate_next_check(self.post, now=base_now)
-        self.assertEqual(next_check, base_now + timedelta(minutes=5))
+        self.assertEqual(next_check, base_now + timedelta(minutes=15))
 
 
 class MetricsAndPrizesTestCase(TestCase):
@@ -584,11 +584,15 @@ class CeleryBeatAndTasksTestCase(TestCase):
             next_check_at=timezone.now() - timedelta(minutes=1),
         )
 
-    @patch('tracker.tasks.check_post_metrics_task.delay')
-    def test_check_all_due_posts_task(self, mock_task_delay):
+    @patch('tracker.tasks.group')
+    def test_check_all_due_posts_task(self, mock_group):
+        mock_job = MagicMock()
+        mock_group.return_value = mock_job
+
         res = check_all_due_posts_task()
         self.assertEqual(res, 1)
-        mock_task_delay.assert_called_once_with(self.post.id)
+        mock_group.assert_called_once()
+        mock_job.apply_async.assert_called_once()
 
         # Post next_check_at avtomatik ravishda kamida 8 daqiqaga oldinga surilganini tekshirish
         self.post.refresh_from_db()

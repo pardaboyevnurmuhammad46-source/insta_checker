@@ -84,12 +84,22 @@ class Command(BaseCommand):
             )
 
         # 4. Foydalanuvchini ulash
+        was_disconnected = ig_user.status != 'connected'
         ig_user.ig_user_id = ig_user_id or ig_user.ig_user_id
         ig_user.name = ig_username or ig_user.name
         ig_user.access_token = token
         ig_user.status = 'connected'
         ig_user.token_expires_at = timezone.now() + timedelta(days=60)
         ig_user.save()
+
+        if was_disconnected:
+            from tracker.models import Post
+            posts_to_restore = Post.objects.filter(link__user=ig_user, status__in=('published', 'verified'), next_check_at__isnull=True)
+            now_time = timezone.now()
+            for p in posts_to_restore:
+                p.next_check_at = now_time + timedelta(minutes=5)
+            if posts_to_restore:
+                Post.objects.bulk_update(posts_to_restore, ['next_check_at'])
 
         self.stdout.write(self.style.SUCCESS("=" * 55))
         self.stdout.write(self.style.SUCCESS(f" [OK] Foydalanuvchi muvaffaqiyatli Instagramga ulandi!"))
