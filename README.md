@@ -64,7 +64,7 @@ Yagona kirish sahifasi: `/login` (rolga qarab avtomatik yo'naltiradi).
 | `INSTAGRAM_SCOPE` | Kerakli ruxsatlar (`instagram_business_basic,instagram_business_content_publish,...`) |
 | `PRIZE_MILESTONES` | Sovrin marralari (masalan `500,1000,5000,10000,50000,100000`) |
 | `MAX_VIDEO_SIZE_MB` | Ruxsat etilgan maksimal video hajmi (`100`) |
-| `INSTAGRAM_API_RATE_LIMIT` | Celery uchun Instagram so'rovlari tezlik cheklovi (`50` so'rov/sekund) |
+| `INSTAGRAM_API_RATE_LIMIT` | Celery uchun Instagram so'rovlari tezlik cheklovi (standart: `50`/sekund) |
 
 ---
 
@@ -176,16 +176,79 @@ Tizimda foydalanuvchilar videoni ikkita qulay usulda joylashtirishlari mumkin:
 
 ### 📊 Adaptiv Statistika Monitoring Jadvali (`calculate_next_check`)
 
-Postlar yoshiga va sovrin marrasiga yaqinligiga qarab oraliq intervallar adaptiv tarzda o'zgaradi:
+Postlar yoshiga, ko'rishlar soniga va sovrin marrasiga yaqinligiga qarab oraliq intervallar sozlamalar orqali adaptiv tarzda belgilanadi:
 
-| Postning Yoshi / Sharti | Tekshiruv Oralig'i | Vazifasi va Maqsadi |
-| :--- | :--- | :--- |
-| **0 – 24 soat** | **Har 5 daqiqada** | Yangi Reels eng ko'p ko'riladigan dastlabki sutkada tezkor ko'rishlar statistikasini ushlash. |
-| **1 – 7 kun** | **Har 10 daqiqada** | Faol o'sish davridagi postlarni muntazam va barqaror monitoring qilish. |
-| **7 kundan eski** | **Har 60 daqiqada (1 soat)** | Eski postlar uchun Meta API limitlarini tejash. |
-| **Keyingi marraning 80% iga yetganda** | **Har 5 daqiqada** | Sovrin (Prize) marrasiga yaqinlashganda (masalan, 500 ning 400 tasida) sovrinni kechiktirmay berish. |
+| Postning Yoshi / Sharti | Standart Oraliq | Sozlama Parametri | Vazifasi va Maqsadi |
+| :--- | :--- | :--- | :--- |
+| **0 – 24 soat** | **Har 30 daqiqada** | `CHECK_INTERVAL_0_24H=30` | Yangi Reels eng ko'p ko'riladigan dastlabki sutkada tezkor ko'rishlar statistikasini ushlash. |
+| **1 – 7 kun** | **Har 3 soatda (180 min)** | `CHECK_INTERVAL_1_7D=180` | Faol o'sish davridagi postlarni muntazam va barqaror monitoring qilish. |
+| **7 – 30 kun** | **Har 12 soatda (720 min)** | `CHECK_INTERVAL_7_30D=720` | Sekinlashgan postlarni optimal oraliqda tekshirish. |
+| **30 kundan eski yoki views >= 5000** | **Har 24 soatda (1440 min)** | `CHECK_INTERVAL_OLDER_30D=1440` | Marraga yetgan yoki eski postlar uchun Meta API limitlarini tejash. |
+| **Keyingi marraning 80% iga yetganda** | **Har 15 daqiqada** | `CHECK_INTERVAL_CLOSE_TO_PRIZE=15` | Sovrin (Prize) marrasiga yaqinlashganda (masalan, 500 ning 400 tasida) sovrinni tezkor berish. |
 
-> `check_all_due_posts_task` davriy vazifasi har 5 daqiqada ishga tushib, yuqoridagi jadval bo'yicha vaqti yetgan postlarni fonda tekshiradi.
+---
+
+## ⚡ Ishlash tezligi va Masshtabdorlik (Benchmark)
+
+Tizim katta hajmdagi foydalanuvchilar (10 000 — 1 000 000) va postlarni parallel tekshirish uchun quyidagi arxitektura optimizatsiyalariga ega:
+- **Chunk tasks (`check_users_chunk_task`)**: Foydalanuvchilar `CHECK_USER_CHUNK_SIZE` (standart: 100) ta userdan iborat paketlarga bo'linadi va Celery `group` orqali parallel workerlarga tarqatiladi.
+- **/me/media oqimi**: Har bir post uchun alohida media so'rovi yuborish o'rniga, foydalanuvchining barcha Reels videolari bitta `/me/media` so'rovida (paging bilan) olinadi. Faqat ko'rishlar (views) uchun `/{media-id}/insights` chaqiriladi.
+- **Bulk SQL operatsiyalari (`bulk_save_posts_metrics`)**: Postlar metrikalari va `PostStat` yozuvlari `bulk_update` va `bulk_create` (batch_size=500) yordamida bitta SQL so'rovda saqlanadi (N+1 muammosi bartaraf etilgan).
+- **Redis Sliding Window Rate Limiter**: Lua skripti orqali soniyalik va soatlik cheklovlar ta'minlanadi.
+
+### 1. Benchmark Natijalari Jadvali (`benchmark_run.py`)
+
+Benchmark sinovlari `INSTAGRAM_MODE=mock` (haqiqiy Instagramga so'rov ketmagan holda, `DryRunInstagramClient` bilan) o'tkazildi:
+
+| Userlar | Postlar | API Kechikishi (Min-Max) | Concurrency | Umumiy vaqt | Ishlash tezligi | So'rovlar soni (`list_recent_media` / `get_media_insights` / `fetch_post_metrics`) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **10 000** | 20 035 | 0.0 – 0.0 s | 4 | **75.93 s** | **263.85 post/s** | 30 035 (10 000 / 20 035 / 0) |
+| **500** | 1 000 | 0.2 – 0.5 s | 4 | **193.21 s** | **5.18 post/s** | 1 500 (500 / 1 000 / 0) |
+| **500** | 1 019 | 0.2 – 0.5 s | 8 | **116.89 s** | **8.72 post/s** | 1 519 (500 / 1 019 / 0) |
+
+> **Muhim tekshiruv natijasi**: Barcha sinovlarda `fetch_post_metrics` hisoblagichi `0` ga teng bo'ldi, `list_recent_media` esa foydalanuvchilar soniga aynan teng bo'ldi. Bu yangi samarali `/me/media` oqimi to'liq ishlaganligini tasdiqlaydi.
+
+### 2. Hisoblash Formulasi va Masshtab Taxminlari
+
+Tizimning davriy tekshiruv aylanishi vaqti quyidagi formula bilan ifodalanadi:
+
+$$\text{Vaqt} \approx \frac{\text{Userlar} \times \text{Userga so'rovlar soni} \times \text{O'rtacha kechikish}}{\text{Concurrency}}$$
+
+- **Userga so'rovlar**: 1 ta `/me/media` + har bir post uchun 1 ta `insights` (o'rtacha har userga 2 ta post = 3 ta so'rov).
+- **O'rtacha kechikish ($\text{delay}_{avg}$)**: Meta API tarmoq kechikishi o'rtacha $0.35\text{ s}$ ($0.2\text{ s} - 0.5\text{ s}$).
+
+#### Nazariy Proektsiya Taxminlari *(DIQQAT: Bu hisob-kitoblar faqat nazariy formula bo'yicha taxmin, real tizimda o'lchangan emas)*:
+
+| Foydalanuvchilar soni | Concurrency | Taxminiy umumiy vaqt (sekund) | Taxminiy umumiy vaqt (soat) | Izoh |
+| :--- | :--- | :--- | :--- | :--- |
+| **100 000** | 4 | ~26 250 s | ~7.29 soat | API kechikishi 0.35s bilan |
+| **100 000** | 8 | ~13 125 s | ~3.65 soat | Workerlar soni 8 ta bo'lganda |
+| **100 000** | 32 | ~3 281 s | ~0.91 soat (55 daqiqa) | Katta klasterda parallel ishlaganda |
+| **100 000** | 64 | ~1 640 s | ~0.46 soat (27 daqiqa) | Gorizontal kengaytirilgan workerlar |
+| **1 000 000** | 32 | ~32 812 s | ~9.11 soat | 1 million foydalanuvchi to'plami |
+| **1 000 000** | 64 | ~16 406 s | ~4.56 soat | 64 parallel worker jarayoni bilan |
+
+### 3. Asosiy Sozlamalar (Chunk va Chastota)
+
+Quyidagi parametrlar `config/settings.py` va `.env` orqali boshqariladi:
+- `CHECK_USER_CHUNK_SIZE` (default: `100`): Bitta Celery taskiga biriktiriladigan foydalanuvchilar soni.
+- `CHECK_BATCH_SIZE` (default: `1000`): Dispatcher bitta SQL tranzaksiyasida bazadan bloklaydigan postlar soni.
+- `MAX_POSTS_PER_RUN` (default: `50000`): Bitta dispatcher aylanishida navbatga qo'yiladigan maksimal postlar chegarasi.
+- `CHECK_INTERVAL_0_24H` (default: `30` min): 0-24 soatlik postlar tekshirish oralig'i.
+- `CHECK_INTERVAL_1_7D` (default: `180` min): 1-7 kunlik postlar oralig'i.
+- `CHECK_INTERVAL_7_30D` (default: `720` min): 7-30 kunlik postlar oralig'i.
+- `CHECK_INTERVAL_OLDER_30D` (default: `1440` min): 30 kundan eski yoki views >= 5000 postlar oralig'i.
+- `CHECK_INTERVAL_CLOSE_TO_PRIZE` (default: `15` min): Sovrin marrasiga 80% yetgan postlar oralig'i.
+
+### 4. Muhim Cheklovlar va Ochiq Eslatmalar
+
+Muhandislik shaffofligi yuzasidan quyidagi jihatlar ochiq qayd etiladi:
+1. **Natijalar sun'iy (mock) kechikish bilan o'lchangan**: Benchmark natijalari `DryRunInstagramClient` sun'iy kechikishida olingan bo'lib, haqiqiy Meta Instagram Graph API serverlarining javob berish tezligi, mintaqaviy kechikishlar va TLS handshakes ko'rsatkichlari farq qilishi mumkin.
+2. **Instagram rate limit raqami tasdiqlanmagan**: Meta hujjatlarida Instagram Graph API uchun sekundiga aniq umumiy so'rovlar limiti ochiqlanmagan. Tizimdagi `INSTAGRAM_API_RATE_LIMIT=50` parametri ehtiyotkorlik chegarasi sifatida olingan, tasdiqlangan rasmiy ko'rsatkich emas.
+3. **Views >= 5000 postlar chastotasi**: 5000 ko'rishdan oshgan postlar sutkada 1 marta (24 soatda) tekshiriladi. Shu sababli, foydalanuvchi videoni Instagram'dan o'chirib tashlasa yoki keyingi marraga erishsa, bu holat 24 soatgacha kech aniqlanishi mumkin.
+4. **Meta App Development rejimi**: Ilova hozirda Development rejimida bo'lib, faqat Meta for Developers paneliga qo'shilgan Instagram Tester akkauntlari bilan ishlaydi. Minglab real foydalanuvchilarni qamrab olish uchun Meta App Review jarayonidan o'tish va ruxsatlar bo'yicha **Advanced Access** olish shart.
+5. **Haqiqiy Instagram bilan to'liq yuklama sinovi hali o'tkazilmagan**: Minglab real akkauntlar bilan jonli tarmoqda yuklama sinovi o'tkazilmagan (faqat sintetik benchmark va birlik testlari bajarilgan).
+6. **Kelajakdagi optimizatsiya rejalari**: `PostStat` yozuvlarini davriy agregatsiya qilish (ma'lumotlar bazasi hajmini kamaytirish uchun eski daqiqalik yozuvlarni soatlik/kunlikka jamlash) hamda `sync_recent_active_users_task` vazifasini ham chunk arxitekturasiga birlashtirish kelgusi bosqich vazifasi hisoblanadi.
 
 ---
 

@@ -121,7 +121,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 @shared_task(bind=True, max_retries=2, default_retry_delay=30, acks_late=True, reject_on_worker_lost=True, time_limit=600, soft_time_limit=540)
 def check_users_chunk_task(self, user_ids: list[int]):
     """
-    Foydalanuvchilar paketi (50-100 user) uchun postlar statistikasini parallel tekshiruvchi task.
+    Foydalanuvchilar paketi (chunk) uchun postlar statistikasini parallel tekshiruvchi task.
     1. Chunkdagi barcha postlar bitta SQL so'rovda olinadi (select_related('link__user')).
     2. Har bir user alohida try/except da: bitta user xatosi boshqalarga ta'sir qilmaydi.
     3. Rate limiter (account va global) tekshiriladi: limitga urilsa task kutib turmaydi (sleep yo'q),
@@ -389,6 +389,13 @@ def check_users_chunk_task(self, user_ids: list[int]):
         "Chunk tekshiruvi yakunlandi: %d ta user qayta ishlandi, %d ta post bulk yangilandi",
         processed_users, save_result.get('updated_posts_count', 0)
     )
+
+    try:
+        r_chunk = get_redis_client()
+        r_chunk.incr("dry_run:sim:counters:completed_chunks")
+    except Exception:
+        pass
+
     return {
         "processed_users": processed_users,
         "save_result": save_result,
@@ -399,7 +406,7 @@ def check_users_chunk_task(self, user_ids: list[int]):
 def check_all_due_posts_task():
     """
     next_check_at vaqti kelgan barcha faol (published/verified) postlarning userlarini aniqlaydi,
-    50-100 userdan iborat chunklarga bo'lib, Celery group orqali parallel tekshirishga yuboradi.
+    userlardan iborat chunklarga bo'lib, Celery group orqali parallel tekshirishga yuboradi.
     Redis lock orqali Celery Beat ning parallel ustma-ust tushishi oldi olinadi.
     """
     lock_key = "lock:celery_beat:check_all_due_posts"
@@ -416,38 +423,57 @@ def check_all_due_posts_task():
     try:
         now = timezone.now()
         batch_size = getattr(settings, 'CHECK_BATCH_SIZE', 1000)
+        max_to_dispatch = getattr(settings, 'MAX_POSTS_PER_RUN', 50000)
         user_chunk_size = getattr(settings, 'CHECK_USER_CHUNK_SIZE', 100)
 
-        with transaction.atomic():
-            due_posts = list(
-                Post.objects.select_for_update(skip_locked=True)
-                .filter(
-                    models.Q(status__in=['published', 'verified']),
-                    models.Q(next_check_at__lte=now) | models.Q(next_check_at__isnull=True),
-                    link__user__status='connected',
+        total_post_ids = []
+        total_user_ids = []
+
+        while len(total_post_ids) < max_to_dispatch:
+            limit = min(batch_size, max_to_dispatch - len(total_post_ids))
+            with transaction.atomic():
+                due_posts = list(
+                    Post.objects.select_for_update(skip_locked=True)
+                    .filter(
+                        models.Q(status__in=['published', 'verified']),
+                        models.Q(next_check_at__lte=now) | models.Q(next_check_at__isnull=True),
+                        link__user__status='connected',
+                    )
+                    .order_by('next_check_at')
+                    .values_list('id', 'link__user_id')[:limit]
                 )
-                .order_by('next_check_at')
-                .values_list('id', 'link__user_id')[:batch_size]
-            )
-            if not due_posts:
-                return 0
+                if not due_posts:
+                    break
 
-            post_ids = [p[0] for p in due_posts]
-            user_ids = list(dict.fromkeys(p[1] for p in due_posts if p[1]))
+                post_ids = [p[0] for p in due_posts]
+                user_ids = [p[1] for p in due_posts if p[1]]
 
-            # Workerlar qayta ishlayotganda boshqa beat aylanishi olib ketmasligi uchun 2 soatga suramiz
-            Post.objects.filter(id__in=post_ids).update(next_check_at=now + timedelta(hours=2))
+                # Workerlar qayta ishlayotganda boshqa beat aylanishi olib ketmasligi uchun 2 soatga suramiz
+                Post.objects.filter(id__in=post_ids).update(next_check_at=now + timedelta(hours=2))
+                total_post_ids.extend(post_ids)
+                total_user_ids.extend(user_ids)
 
-        chunks = [user_ids[i:i + user_chunk_size] for i in range(0, len(user_ids), user_chunk_size)]
+        if not total_post_ids:
+            return 0
+
+        unique_user_ids = list(dict.fromkeys(total_user_ids))
+        chunks = [unique_user_ids[i:i + user_chunk_size] for i in range(0, len(unique_user_ids), user_chunk_size)]
+
+        if r:
+            try:
+                r.set("dry_run:sim:counters:total_chunks", len(chunks))
+                r.set("dry_run:sim:counters:completed_chunks", 0)
+            except Exception:
+                pass
 
         job = group(check_users_chunk_task.s(chunk) for chunk in chunks)
         job.apply_async()
 
         logger.info(
             "Vaqti yetgan postlar tekshiruvi: %d ta post, %d ta user, %d ta chunk guruhiga bo'lib yuborildi",
-            len(post_ids), len(user_ids), len(chunks)
+            len(total_post_ids), len(unique_user_ids), len(chunks)
         )
-        return len(post_ids)
+        return len(total_post_ids)
     finally:
         if r:
             try:

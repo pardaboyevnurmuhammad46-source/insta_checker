@@ -337,16 +337,22 @@ def generate_benchmark_data(num_users: int = 1000, clear_existing: bool = False)
 
     # 2. UniqueLink lar yaratish (har userga 1-3 ta)
     print(f"[BENCHMARK] Har bir userga 1-3 tadan UniqueLink yaratilmoqda...")
+    used_codes = set(UniqueLink.objects.values_list('code', flat=True))
     links_to_create = []
     for u in created_users:
         posts_count = random.randint(1, 3)
         for _ in range(posts_count):
+            while True:
+                candidate = generate_unique_link_code()
+                if candidate not in used_codes:
+                    used_codes.add(candidate)
+                    break
             links_to_create.append(
                 UniqueLink(
                     user=u,
                     video=default_video,
                     status="posted",
-                    code=generate_unique_link_code(),
+                    code=candidate,
                 )
             )
             if len(links_to_create) >= batch_size:

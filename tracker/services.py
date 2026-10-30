@@ -522,12 +522,12 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     """
     1 000 000 post miqyosiga moslashtirilgan ilmiy adaptiv chastota:
     - O'chirilgan, rad etilgan yoki tokeni yaroqsiz postlar: None (tekshirilmaydi)
-    - Views >= 5000 bo'lgan yoki barcha asosiy sovrinlari olingan postlar: 24 soat
-    - Keyingi sovrin marrasiga juda yaqin (>=80%): 15 daqiqa
-    - 0-24 soatlik yangi postlar: 30 daqiqa
-    - 1-7 kunlik faol postlar: 3 soat
-    - 7-30 kunlik postlar: 12 soat
-    - 30 kundan eski postlar: 24 soat
+    - Views >= 5000 bo'lgan yoki barcha asosiy sovrinlari olingan postlar: CHECK_INTERVAL_OLDER_30D
+    - Keyingi sovrin marrasiga juda yaqin (>=80%): CHECK_INTERVAL_CLOSE_TO_PRIZE
+    - 0-24 soatlik yangi postlar: CHECK_INTERVAL_0_24H
+    - 1-7 kunlik faol postlar: CHECK_INTERVAL_1_7D
+    - 7-30 kunlik postlar: CHECK_INTERVAL_7_30D
+    - 30 kundan eski postlar: CHECK_INTERVAL_OLDER_30D
     """
     if post.status not in ('published', 'verified'):
         return None
@@ -539,9 +539,15 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
     if now is None:
         now = timezone.now()
 
-    # 1. Agar post views >= 5000 bo'lsa (yirik marraga yetgan, sekin o'suvchi): 24 soat
+    interval_close_to_prize = int(getattr(settings, 'CHECK_INTERVAL_CLOSE_TO_PRIZE', 15))
+    interval_0_24h = int(getattr(settings, 'CHECK_INTERVAL_0_24H', 30))
+    interval_1_7d = int(getattr(settings, 'CHECK_INTERVAL_1_7D', 180))
+    interval_7_30d = int(getattr(settings, 'CHECK_INTERVAL_7_30D', 720))
+    interval_older_30d = int(getattr(settings, 'CHECK_INTERVAL_OLDER_30D', 1440))
+
+    # 1. Agar post views >= 5000 bo'lsa (yirik marraga yetgan, sekin o'suvchi): CHECK_INTERVAL_OLDER_30D
     if post.views >= 5000:
-        return now + timedelta(hours=24)
+        return now + timedelta(minutes=interval_older_30d)
 
     # Keyingi marrani aniqlash
     milestones = get_configured_milestones()
@@ -559,13 +565,13 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
             next_milestone = m
             break
 
-    # 2. Agar barcha marralar olingan bo'lsa: 24 soat
+    # 2. Agar barcha marralar olingan bo'lsa: CHECK_INTERVAL_OLDER_30D
     if not next_milestone:
-        return now + timedelta(hours=24)
+        return now + timedelta(minutes=interval_older_30d)
 
-    # 3. Prizga yaqinlashgan postlar (>=80% va hali olinmagan): har 15 daqiqada
+    # 3. Prizga yaqinlashgan postlar (>=80% va hali olinmagan): CHECK_INTERVAL_CLOSE_TO_PRIZE
     if next_milestone and post.views >= (next_milestone * 0.8):
-        return now + timedelta(minutes=15)
+        return now + timedelta(minutes=interval_close_to_prize)
 
     post_time = post.posted_at or post.last_synced_at or post.last_checked_at
     if not post_time and post.link:
@@ -575,13 +581,13 @@ def calculate_next_check(post: Post, now=None) -> timezone.datetime | None:
 
     age = now - post_time
     if age < timedelta(days=1):  # 0-24 soat
-        return now + timedelta(minutes=30)
+        return now + timedelta(minutes=interval_0_24h)
     elif age < timedelta(days=7):  # 1-7 kun
-        return now + timedelta(hours=3)
+        return now + timedelta(minutes=interval_1_7d)
     elif age < timedelta(days=30):  # 7-30 kun
-        return now + timedelta(hours=12)
+        return now + timedelta(minutes=interval_7_30d)
     else:  # 30 kundan eski
-        return now + timedelta(hours=24)
+        return now + timedelta(minutes=interval_older_30d)
 
 
 def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
