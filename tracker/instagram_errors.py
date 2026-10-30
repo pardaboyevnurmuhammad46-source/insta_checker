@@ -31,11 +31,15 @@ META_ERROR_CATALOG = [
     {
         "type": InstagramErrorType.RATE_LIMIT,
         "name": "Instagram Rate Limit / Throttle",
-        "codes": {4, 17, 32, 341, 613},
-        "subcodes": {1996, 2446079},
+        "codes": {4, 9, 17, 32, 341, 613},
+        "subcodes": {1996, 1349210, 1390008, 2207042, 2446079},
         "code_subcodes": {
             (17, 2446079),  # Ads/API rate limit
             (613, 1996),    # Custom rate limit: inconsistent behavior
+            (4, 1349210),   # Application request limit reached
+            (4, 1390008),   # Short-term throttle (retryable)
+            (9, 2207042),   # 24-hour daily publishing limit (non-retryable)
+            (24, 2207042),
         },
         "http_statuses": {429},
         "description": "Instagram so'rovlar limiti oshdi (app, user, page yoki custom throttle)",
@@ -197,6 +201,22 @@ def classify_instagram_error(
             return InstagramErrorType.PERMISSION_DENIED
 
     return InstagramErrorType.OTHER
+
+
+def is_retryable_rate_limit(error_code: int | None, error_subcode: int | None) -> bool:
+    """
+    Rate limit xatosi qayta urinishga (retry) loyiqmi yoki to'xtatib turish kerakmi:
+    - Subcode 1390008: Qisqa muddatli throttle -> True (qayta urinishga loyiq)
+    - Subcode 2207042: 24 soatlik kunlik publishing limit -> False (qayta urinilmaydi, foydalanuvchiga xabar)
+    - Kodlar 4, 9, 17, 341, 613: Akkaunt/App rate limit -> False (qayta urinilmaydi, akkaunt keyingi aylanishga qoldiriladi)
+    """
+    if error_subcode == 1390008:
+        return True
+    if error_subcode == 2207042:
+        return False
+    if error_code in {4, 9, 17, 341, 613}:
+        return False
+    return False
 
 
 # ==============================================================================

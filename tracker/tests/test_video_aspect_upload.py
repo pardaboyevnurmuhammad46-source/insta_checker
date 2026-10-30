@@ -98,6 +98,8 @@ class Phase7EnhancementsTestCase(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
+        from django.core.cache import cache
+        cache.clear()
 
     def test_video_orientation_detection(self):
         import io, struct
@@ -202,10 +204,11 @@ class ResumableUploadTestCase(TestCase):
             access_token="secret_token_resumable",
             caption="Resumable Caption",
             share_to_feed=True,
+            account_id=self.user.id,
         )
         mock_upload_binary.assert_called_once()
-        mock_wait.assert_called_once_with("resumable_container_123", "secret_token_resumable")
-        mock_publish.assert_called_once_with("ig_resumable_123", "resumable_container_123", "secret_token_resumable")
+        mock_wait.assert_called_once_with("resumable_container_123", "secret_token_resumable", account_id=self.user.id)
+        mock_publish.assert_called_once_with("ig_resumable_123", "resumable_container_123", "secret_token_resumable", account_id=self.user.id)
         self.assertEqual(post.status, 'published')
         self.assertEqual(post.ig_media_id, 'resumable_media_999')
 

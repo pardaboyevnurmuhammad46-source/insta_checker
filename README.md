@@ -64,7 +64,11 @@ Yagona kirish sahifasi: `/login` (rolga qarab avtomatik yo'naltiradi).
 | `INSTAGRAM_SCOPE` | Kerakli ruxsatlar (`instagram_business_basic,instagram_business_content_publish,...`) |
 | `PRIZE_MILESTONES` | Sovrin marralari (masalan `500,1000,5000,10000,50000,100000`) |
 | `MAX_VIDEO_SIZE_MB` | Ruxsat etilgan maksimal video hajmi (`100`) |
-| `INSTAGRAM_API_RATE_LIMIT` | Celery uchun Instagram so'rovlari tezlik cheklovi (standart: `50`/sekund) |
+| `MAX_POSTS_PER_USER_PER_DAY` | Foydalanuvchi kunlik post joylash yuqori chegarasi (standart: `100`, taxminiy chegara) |
+| `POST_COOLDOWN_SECONDS` | Postlar orasidagi kutish oralig'i (standart: `420` soniya / 7 daqiqa, `0` bo'lsa o'chadi) |
+| `PUBLISHING_LIMIT_CACHE_TTL` | Instagram publishing limit Redis kesh muddati (standart: `120` soniya) |
+| `INSTAGRAM_USAGE_SLOWDOWN_PERCENT` | Meta Business Usage chegarasi (standart: `80`%) |
+| `INSTAGRAM_API_RATE_LIMIT` | Celery uchun Instagram so'rovlari tezlik cheklovi (standart: `50`/sekund, taxminiy chegara) |
 
 ---
 
@@ -249,6 +253,42 @@ Muhandislik shaffofligi yuzasidan quyidagi jihatlar ochiq qayd etiladi:
 4. **Meta App Development rejimi**: Ilova hozirda Development rejimida bo'lib, faqat Meta for Developers paneliga qo'shilgan Instagram Tester akkauntlari bilan ishlaydi. Minglab real foydalanuvchilarni qamrab olish uchun Meta App Review jarayonidan o'tish va ruxsatlar bo'yicha **Advanced Access** olish shart.
 5. **Haqiqiy Instagram bilan to'liq yuklama sinovi hali o'tkazilmagan**: Minglab real akkauntlar bilan jonli tarmoqda yuklama sinovi o'tkazilmagan (faqat sintetik benchmark va birlik testlari bajarilgan).
 6. **Kelajakdagi optimizatsiya rejalari**: `PostStat` yozuvlarini davriy agregatsiya qilish (ma'lumotlar bazasi hajmini kamaytirish uchun eski daqiqalik yozuvlarni soatlik/kunlikka jamlash) hamda `sync_recent_active_users_task` vazifasini ham chunk arxitekturasiga birlashtirish kelgusi bosqich vazifasi hisoblanadi.
+
+---
+
+## 🛡️ Limitlar va Himoya Mexanizmlari (Rate Limiting, Cooldown, Quota)
+
+Tizimda Meta (Instagram) serverlarining spam-blokirovkasiga tushmaslik va foydalanuvchilarga xavfsiz xizmat ko'rsatish uchun 4 bosqichli himoya mexanizmi amal qiladi:
+
+### 1. Kunlik Post Limiti (`content_publishing_limit`)
+- **Instagram'dan o'qish**: Video joylashdan oldin `GET /{ig_user_id}/content_publishing_limit?fields=quota_usage,config` chaqirilib, foydalanuvchining so'nggi 24 soatlik amaldagi kvotasi (`quota_usage`) va umumiy ruxsat etilgan soni (`quota_total`) o'qiladi.
+- **Chegara**: Amaldagi chegara `min(quota_total, MAX_POSTS_PER_USER_PER_DAY)` formulasiga ko'ra belgilanadi (standart: `MAX_POSTS_PER_USER_PER_DAY=100`, taxminiy yuqori chegara).
+- **Kesh**: Har bir post urinishida API ga ortiqcha yuk tushirmaslik uchun limit natijasi Redis'da `120` soniya (`PUBLISHING_LIMIT_CACHE_TTL`) davomida keshlanadi.
+- **Xabar berish**: Agar foydalanuvchining kvotasi to'lgan bo'lsa, post qilish boshlanmaydi va foydalanuvchiga aniq tushunarli xabar qaytariladi:  
+  *`"Instagram kunlik post limiti tugadi (100/100). Taxminan 24 soatdan keyin yana urinib ko'ring."`*
+- **Xatolikka bardoshlilik (Fallback)**: Agar Meta API'dan kvota olishda xatolik (server error, tarmoq uzilishi) yuz bersa, tizim post joylashni asossiz to'xtatmaydi, xatoni logga yozib jarayonni davom ettiradi.
+
+### 2. Postlar orasida kutish (Cooldown)
+- **Alohida foydalanuvchi hisobi**: `POST_COOLDOWN_SECONDS` (standart: `420` soniya / 7 daqiqa). Har bir foydalanuvchi uchun alohida hisoblanadi — foydalanuvchilar bir-birini kutmaydi.
+- **Rad etilmasdan navbatga tushish**: Foydalanuvchi oxirgi muvaffaqiyatli postidan so'ng 7 daqiqa o'tmasdan yana video joylashni so'rasa, so'rov **rad etilmaydi**. Post `queued` holatiga o'tadi va Celery `apply_async(countdown=remaining_seconds)` orqali cooldown tugagan vaqtda avtomatik ravishda Instagram'ga chiqariladi.
+- **Aniq vaqt ko'rsatish**: API javobida va holat tekshiruvida foydalanuvchiga qancha kutishi kerakligi aniq vaqt bilan qaytariladi (`"keyingi post: 17:35 da avtomatik joylanadi"`).
+- **Poyga holatlaridan (Race Condition) himoya**: Bir vaqtda bir nechta parallel so'rov yuborib cooldown'ni aylanib o'tmaslik uchun Redis atomik qulfi (`SET NX`, TTL 10–15s) ishlatiladi.
+- **O'chirish imkoniyati**: `POST_COOLDOWN_SECONDS=0` qilinsa, postlar orasidagi kutish o'chiriladi.
+- *Eslatma: 24 soatlik limit umumiy postlar sonini cheklaydi, cooldown esa qisqa vaqt ichida ketma-ket agressiv video joylashning oldini oladi.*
+
+### 3. Rate Limiterni Meta Sarlavhalariga Moslash (`X-Business-Use-Case-Usage`)
+- **Usage Foizlarini O'qish**: Meta Graph API har bir so'rov javobida `X-Business-Use-Case-Usage` sarlavhasini qaytaradi. Undagi `type=instagram` bo'lgan yozuvning `call_count`, `total_time` va `total_cputime` foizlari tekshiriladi.
+- **Sekinlashtirish / To'xtatish**: Agar foiz `INSTAGRAM_USAGE_SLOWDOWN_PERCENT` (standart: `80`%) dan oshsa, o'sha akkaunt uchun so'rovlar sarlavhadagi `estimated_time_to_regain_access` (daqiqada) muddati bo'yicha Redis'da to'xtatib turiladi (`account_usage_slowdown`). Celery chunk tasklari bu foydalanuvchini kutib turmasdan keyingi aylanishga qoldiradi.
+- **Xato kodlari bilan boshqaruv**:
+  - Kodlar `4, 9, 17, 341, 613`: Akkaunt vaqtincha to'xtatiladi, qayta urinilmaydi (`retry` qilinmaydi), keyingi monitoring aylanishiga qoldiriladi.
+  - Subcode `1390008` (qisqa muddatli throttle): Qayta urinishga loyiq (`self.retry(countdown=60)`).
+  - Subcode `2207042` (24 soatlik kunlik publishing limiti): Qayta urinilmaydi, post `failed` qilinadi va foydalanuvchiga tizim bildirishnomasi (Notification) yuboriladi.
+- **Taxminiy chegaralar**: Koddagi `5` so'rov/sekund va `200` so'rov/soat ko'rsatkichlari rasmiy kafolatlangan raqam emas, balki sozlanuvchi **taxminiy xavfsizlik chegaralari** hisoblanadi.
+
+### 4. Ochiq Cheklovlar va Eslatmalar
+1. **Haqiqiy Instagram bilan to'liq yuklama sinovi o'tkazilmagan**: Cooldown va sarlavhalar logikasi birlik testlari va `mock`/simulyatsiya rejimida sinovdan o'tkazildi, minglab real akkauntlar bilan jonli tarmoqda sinov o'tkazilmagan.
+2. **Meta hujjatlaridagi ziddiyat**: Meta rasmiy qo'llanmalarida Instagram Reels uchun kunlik limit ba'zi sahifalarda 25 ta, boshqa joylarda 50 yoki 100 ta deb ziddiyatli ko'rsatilgan. Tizim `content_publishing_limit` orqali aynan o'sha akkauntga berilgan real kvotani o'qiydi.
+3. **App Review**: Barcha ushbu imkoniyatlar keng omma uchun ishlashi uchun Meta App Review'dan o'tish talab etiladi.
 
 ---
 

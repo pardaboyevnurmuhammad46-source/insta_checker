@@ -262,10 +262,16 @@ PRIZE_MILESTONES = [int(m.strip()) for m in raw_milestones.split(',') if m.strip
 MAX_VIDEO_SIZE_MB = int(os.getenv('MAX_VIDEO_SIZE_MB', '100'))
 MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
 
+# Foydalanuvchi kunlik post joylash yuqori chegarasi (taxminiy maksimal chegara, default: 100)
+MAX_POSTS_PER_USER_PER_DAY = int(os.getenv('MAX_POSTS_PER_USER_PER_DAY', '100'))
+PUBLISHING_LIMIT_CACHE_TTL = int(os.getenv('PUBLISHING_LIMIT_CACHE_TTL', '120')) # Redis kesh muddati (soniya)
+POST_COOLDOWN_SECONDS = int(os.getenv('POST_COOLDOWN_SECONDS', '420')) # Postlar orasidagi kutish (cooldown), 0 bo'lsa o'chadi
+
 # API Rate Limiting for Instagram
-INSTAGRAM_API_RATE_LIMIT = int(os.getenv('INSTAGRAM_API_RATE_LIMIT', '50')) # requests per second (global)
-INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC', '5')) # per account per second
-INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR', '200')) # per account per hour
+INSTAGRAM_API_RATE_LIMIT = int(os.getenv('INSTAGRAM_API_RATE_LIMIT', '50')) # requests per second (global, taxminiy chegara)
+INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC', '5')) # per account per second (taxminiy chegara)
+INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR = int(os.getenv('INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR', '200')) # per account per hour (taxminiy chegara)
+INSTAGRAM_USAGE_SLOWDOWN_PERCENT = int(os.getenv('INSTAGRAM_USAGE_SLOWDOWN_PERCENT', '80')) # Meta Business Usage chegarasi (foizda, standart: 80%)
 CHECK_BATCH_SIZE = int(os.getenv('CHECK_BATCH_SIZE', '1000'))
 MAX_POSTS_PER_RUN = int(os.getenv('MAX_POSTS_PER_RUN', '50000'))
 

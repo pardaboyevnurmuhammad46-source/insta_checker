@@ -104,8 +104,8 @@ class InstagramRateLimiter:
     """
     Barcha Celery worker'lar uchun Redis va Lua asosidagi umumiy tezlik cheklagich.
     - Global tezlik: settings.INSTAGRAM_API_RATE_LIMIT (standart: 50/s)
-    - Akkaunt sekundiga: settings.INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC (standart: 5/s)
-    - Akkaunt soatiga: settings.INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR (standart: 200/h)
+    - Akkaunt sekundiga: settings.INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC (taxminiy chegara, standart: 5/s)
+    - Akkaunt soatiga: settings.INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR (taxminiy chegara, standart: 200/h)
     """
 
     def __init__(self, redis_client=None):
@@ -128,11 +128,78 @@ class InstagramRateLimiter:
             self._script = r.register_script(SLIDING_WINDOW_LUA)
         return self._script
 
+    def parse_and_apply_business_usage(self, headers: dict, account_id: str | int | None = None) -> tuple[bool, int, int]:
+        """
+        Meta Graph API javobidagi X-Business-Use-Case-Usage sarlavhasini o'qiydi:
+        - Agar type=instagram bo'lgan yozuvning call_count, total_time yoki total_cputime
+          ko'rsatkichi INSTAGRAM_USAGE_SLOWDOWN_PERCENT (standart: 80%) dan oshsa:
+          o'sha akkauntni estimated_time_to_regain_access (daqiqada) bo'yicha to'xtatadi.
+        Qaytaradi: (is_paused, max_percent, pause_seconds)
+        """
+        if not headers or not account_id:
+            return False, 0, 0
+
+        raw_usage = (
+            headers.get('X-Business-Use-Case-Usage')
+            or headers.get('x-business-use-case-usage')
+        )
+        if not raw_usage:
+            return False, 0, 0
+
+        try:
+            import json
+            usage_data = json.loads(raw_usage) if isinstance(raw_usage, str) else raw_usage
+            items = []
+            if isinstance(usage_data, dict):
+                for val in usage_data.values():
+                    if isinstance(val, list):
+                        items.extend(val)
+                    elif isinstance(val, dict):
+                        items.append(val)
+            elif isinstance(usage_data, list):
+                items = usage_data
+
+            slowdown_thresh = int(getattr(settings, 'INSTAGRAM_USAGE_SLOWDOWN_PERCENT', 80))
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get('type') == 'instagram':
+                    c_cnt = int(item.get('call_count', 0))
+                    t_time = int(item.get('total_time', 0))
+                    t_cpu = int(item.get('total_cputime', 0))
+                    max_pct = max(c_cnt, t_time, t_cpu)
+
+                    if max_pct >= slowdown_thresh:
+                        est_min = int(item.get('estimated_time_to_regain_access', 0))
+                        pause_sec = max(60, est_min * 60) if est_min > 0 else 300
+                        r = self.get_redis()
+                        pause_key = f"{{ig_rate}}:acc:{account_id}:paused"
+                        r.set(pause_key, str(max_pct), ex=pause_sec)
+                        logger.warning(
+                            "Akkaunt %s Meta Business Usage foizi yuqori (%d%% >= %d%%). %d soniyaga to'xtatildi.",
+                            account_id, max_pct, slowdown_thresh, pause_sec
+                        )
+                        return True, max_pct, pause_sec
+        except Exception as exc:
+            logger.debug("Business usage sarlavhasini tahlil qilishda xatolik: %s", exc)
+
+        return False, 0, 0
+
     def acquire(self, account_id: str | int | None = None, requests_count: int = 1) -> tuple[bool, float, str]:
         """
         Instagram API ga so'rov yuborishdan oldin ruxsat so'raydi.
         Qaytaradi: (allowed, retry_after_seconds, reason)
         """
+        if account_id:
+            try:
+                r = self.get_redis()
+                pause_key = f"{{ig_rate}}:acc:{account_id}:paused"
+                if r.exists(pause_key):
+                    ttl = r.ttl(pause_key)
+                    return False, max(1.0, float(ttl)), 'account_usage_slowdown'
+            except Exception:
+                pass
+
         global_limit = getattr(settings, 'INSTAGRAM_API_RATE_LIMIT', 50)
         account_sec_limit = getattr(settings, 'INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_SEC', 5)
         account_hour_limit = getattr(settings, 'INSTAGRAM_ACCOUNT_RATE_LIMIT_PER_HOUR', 200)
@@ -212,6 +279,7 @@ class InstagramRateLimiter:
                 keys.extend([
                     f"{{ig_rate}}:acc:{account_id}:sec",
                     f"{{ig_rate}}:acc:{account_id}:hour",
+                    f"{{ig_rate}}:acc:{account_id}:paused",
                 ])
             r.delete(*keys)
         except Exception:

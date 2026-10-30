@@ -207,34 +207,47 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
 # 2. Instagram Reels joylash (Publishing)
 # ==========================================
 
-def create_reels_container(ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
-    return get_instagram_client().create_reels_container(ig_user_id, video_url, access_token, caption)
+def _acquire_publishing_rate_limit(user_id: int):
+    allowed, retry_after, reason = rate_limiter.acquire(account_id=user_id)
+    if not allowed:
+        raise InstagramRateLimitError(
+            f"Instagram rate limit cheklovi ({reason}). {retry_after:.1f} soniya kutiladi.",
+            retry_after=retry_after,
+        )
+
+
+def check_instagram_account_type(access_token: str, ig_user_id: str = 'me', account_id: int | None = None) -> str:
+    return get_instagram_client().check_account_type(access_token, ig_user_id, account_id=account_id)
+
+
+def create_reels_container(ig_user_id: str, video_url: str, access_token: str, caption: str = '', account_id: int | None = None) -> str:
+    return get_instagram_client().create_reels_container(ig_user_id, video_url, access_token, caption, account_id=account_id)
 
 
 def create_reels_container_resumable(
-    ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+    ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True, account_id: int | None = None
 ) -> tuple[str, str]:
-    return get_instagram_client().create_reels_container_resumable(ig_user_id, access_token, caption, share_to_feed)
+    return get_instagram_client().create_reels_container_resumable(ig_user_id, access_token, caption, share_to_feed, account_id=account_id)
 
 
-def upload_video_binary(upload_url: str, file_obj, file_size: int, access_token: str) -> None:
-    return get_instagram_client().upload_video_binary(upload_url, file_obj, file_size, access_token)
+def upload_video_binary(upload_url: str, file_obj, file_size: int, access_token: str, account_id: int | None = None) -> None:
+    return get_instagram_client().upload_video_binary(upload_url, file_obj, file_size, access_token, account_id=account_id)
 
 
-def check_container_status(container_id: str, access_token: str) -> dict:
-    return get_instagram_client().check_container_status(container_id, access_token)
+def check_container_status(container_id: str, access_token: str, account_id: int | None = None) -> dict:
+    return get_instagram_client().check_container_status(container_id, access_token, account_id=account_id)
 
 
-def wait_for_container_ready(container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
-    return get_instagram_client().wait_for_container_ready(container_id, access_token, max_attempts=max_attempts, delay=delay)
+def wait_for_container_ready(container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2, account_id: int | None = None) -> bool:
+    return get_instagram_client().wait_for_container_ready(container_id, access_token, max_attempts=max_attempts, delay=delay, account_id=account_id)
 
 
-def publish_container(ig_user_id: str, container_id: str, access_token: str) -> str:
-    return get_instagram_client().publish_container(ig_user_id, container_id, access_token)
+def publish_container(ig_user_id: str, container_id: str, access_token: str, account_id: int | None = None) -> str:
+    return get_instagram_client().publish_container(ig_user_id, container_id, access_token, account_id=account_id)
 
 
-def get_media_permalink(ig_media_id: str, access_token: str) -> str:
-    return get_instagram_client().get_media_permalink(ig_media_id, access_token)
+def get_media_permalink(ig_media_id: str, access_token: str, account_id: int | None = None) -> str:
+    return get_instagram_client().get_media_permalink(ig_media_id, access_token, account_id=account_id)
 
 
 def validate_video_orientation(file_field) -> str | None:
@@ -277,6 +290,108 @@ def validate_video_orientation(file_field) -> str | None:
     return None
 
 
+def check_content_publishing_limit(user: InstagramUser) -> tuple[bool, str | None, dict | None]:
+    """
+    Foydalanuvchining Instagram Reels joylash kvotasini tekshiradi:
+    1. Redis'da 60-120 soniyalik keshni tekshiradi.
+    2. Instagram Graph API /content_publishing_limit orqali quota_usage va quota_total ni oladi.
+    3. MAX_POSTS_PER_USER_PER_DAY va quota_total dan kichigini chegara qilib belgilaydi.
+    4. Limit oshgan bo'lsa (False, "xabar", data) qaytaradi.
+    5. Instagram so'rovi xato bersa, postni to'xtatmaydi, log yozib (True, None, None) qaytaradi.
+    """
+    if not user or not user.ig_user_id or not user.access_token:
+        return True, None, None
+
+    cache_ttl = int(getattr(settings, 'PUBLISHING_LIMIT_CACHE_TTL', 120))
+    cache_key = f"ig:publishing_limit:{user.id}"
+    r = None
+    try:
+        r = get_redis_client()
+        cached = r.get(cache_key)
+        if cached:
+            import json
+            data = json.loads(cached)
+            if not data.get('allowed', True):
+                return False, data.get('reason'), data
+            return True, None, data
+    except Exception as redis_exc:
+        logger.debug("Redis publishing limit keshini o'qishda xatolik: %s", redis_exc)
+
+    try:
+        client = get_instagram_client()
+        limit_data = client.get_content_publishing_limit(user.ig_user_id, user.access_token, account_id=user.id)
+    except Exception as exc:
+        logger.warning(
+            "Instagram content_publishing_limit tekshirib bo'lmadi (user_id=%s): %s",
+            user.id, mask_sensitive_data(str(exc))
+        )
+        return True, None, None
+
+    max_day_limit = int(getattr(settings, 'MAX_POSTS_PER_USER_PER_DAY', 100))
+    quota_usage = int(limit_data.get('quota_usage', 0))
+    quota_total = int(limit_data.get('quota_total') or max_day_limit)
+    quota_duration = int(limit_data.get('quota_duration', 86400))
+
+    effective_limit = min(quota_total, max_day_limit)
+
+    is_allowed = quota_usage < effective_limit
+    reason = None
+    if not is_allowed:
+        hours = max(1, round(quota_duration / 3600))
+        reason = (
+            f"Instagram kunlik post limiti tugadi ({quota_usage}/{effective_limit}). "
+            f"Taxminan {hours} soatdan keyin yana urinib ko'ring."
+        )
+
+    res_payload = {
+        'allowed': is_allowed,
+        'reason': reason,
+        'quota_usage': quota_usage,
+        'quota_total': quota_total,
+        'effective_limit': effective_limit,
+        'quota_duration': quota_duration,
+    }
+
+    if r:
+        try:
+            import json
+            r.set(cache_key, json.dumps(res_payload), ex=cache_ttl)
+        except Exception:
+            pass
+
+    return is_allowed, reason, res_payload
+
+
+def get_user_post_cooldown(user: InstagramUser) -> tuple[bool, int, timezone.datetime | None, str | None]:
+    """
+    Foydalanuvchining postlar orasidagi kutish (cooldown) holatini tekshiradi:
+    - settings.POST_COOLDOWN_SECONDS (standart: 420s / 7 daqiqa).
+    - 0 bo'lsa cooldown o'chirilgan.
+    - Qaytaradi: (is_active, remaining_seconds, next_post_time, formatted_HH_MM)
+    """
+    cooldown_seconds = int(getattr(settings, 'POST_COOLDOWN_SECONDS', 420))
+    if cooldown_seconds <= 0 or not user or not user.pk:
+        return False, 0, None, None
+
+    last_post = (
+        Post.objects.filter(link__user=user, status='published', posted_at__isnull=False)
+        .order_by('-posted_at')
+        .first()
+    )
+    if not last_post or not last_post.posted_at:
+        return False, 0, None, None
+
+    now = timezone.now()
+    elapsed = (now - last_post.posted_at).total_seconds()
+    if elapsed < cooldown_seconds:
+        remaining = int(cooldown_seconds - elapsed)
+        next_time = last_post.posted_at + timedelta(seconds=cooldown_seconds)
+        next_time_local = timezone.localtime(next_time) if timezone.is_aware(next_time) else next_time
+        return True, remaining, next_time, next_time_local.strftime("%H:%M")
+
+    return False, 0, None, None
+
+
 def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     try:
         link = UniqueLink.objects.select_related('user').get(id=link_id)
@@ -287,8 +402,23 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     if user.status != 'connected' or not user.access_token or not user.ig_user_id:
         raise InstagramPublishError("Foydalanuvchi Instagram akkauntini ulamagan yoki token yo'q.")
 
+    # 0. Akkaunt tezlik cheklovini tekshirish
+    _acquire_publishing_rate_limit(user.id)
+
+    # Instagram kunlik post limitini tekshirish
+    allowed, limit_err, _ = check_content_publishing_limit(user)
+    if not allowed:
+        post, _ = Post.objects.get_or_create(link=link)
+        post.status = 'failed'
+        post.error = limit_err
+        post.save(update_fields=['status', 'error'])
+        # Kunlik limit to'lganda link failed qilinmaydi, ertasi kuni qayta urinish uchun pending qoladi
+        link.status = 'pending'
+        link.save(update_fields=['status'])
+        raise InstagramPublishError(limit_err)
+
     # Akkaunt turini tekshirish (shaxsiy akkauntlarga Reels joylab bo'lmaydi)
-    acc_type = check_instagram_account_type(user.access_token, user.ig_user_id)
+    acc_type = check_instagram_account_type(user.access_token, user.ig_user_id, account_id=user.id)
     if acc_type == 'PERSONAL':
         err_msg = "Sizning Instagram akkauntingiz shaxsiy (Personal). Reels avtomatik joylash faqat Professional (Business yoki Creator) akkauntlar uchun amal qiladi."
         post, _ = Post.objects.get_or_create(link=link)
@@ -403,12 +533,14 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
     try:
         if upload_mode == 'resumable':
             try:
-                # Resumable upload: video Meta serveriga to'g'ridan-to'g'ri binary oqim bilan yuklanadi (ngrok/URL shart emas)
+                # Resumable upload: video Meta serveriga to'g'ridan-to'g'ri binary oqim bilan yuklanadi
+                _acquire_publishing_rate_limit(user.id)
                 container_id, upload_uri = create_reels_container_resumable(
                     ig_user_id=user.ig_user_id,
                     access_token=user.access_token,
                     caption=caption,
                     share_to_feed=True,
+                    account_id=user.id,
                 )
                 if hasattr(chosen_video.file, 'open'):
                     chosen_video.file.open('rb')
@@ -417,6 +549,7 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
                     file_obj=chosen_video.file,
                     file_size=file_size,
                     access_token=user.access_token,
+                    account_id=user.id,
                 )
             except InstagramPublishError as res_err:
                 # Agar Meta akkaunt tokeni uchun resumable'ni qo'llab-quvvatlamasa (masalan Instagram Login tokenida), URL rejimiga o'tamiz
@@ -459,11 +592,13 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
                         pass
 
             try:
+                _acquire_publishing_rate_limit(user.id)
                 container_id = create_reels_container(
                     ig_user_id=user.ig_user_id,
                     video_url=video_url,
                     access_token=user.access_token,
                     caption=caption,
+                    account_id=user.id,
                 )
             except InstagramPublishError as pub_err:
                 if "Invalid OAuth access token" in str(pub_err) or "Cannot parse access token" in str(pub_err) or "OAuthException" in str(pub_err):
@@ -471,11 +606,12 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
                     user.save(update_fields=['status'])
                 raise
 
-        wait_for_container_ready(container_id, user.access_token)
+        wait_for_container_ready(container_id, user.access_token, account_id=user.id)
 
-        ig_media_id = publish_container(user.ig_user_id, container_id, user.access_token)
+        _acquire_publishing_rate_limit(user.id)
+        ig_media_id = publish_container(user.ig_user_id, container_id, user.access_token, account_id=user.id)
 
-        permalink = get_media_permalink(ig_media_id, user.access_token)
+        permalink = get_media_permalink(ig_media_id, user.access_token, account_id=user.id)
 
         post.ig_media_id = ig_media_id
         post.permalink = permalink
@@ -495,6 +631,8 @@ def publish_reels_for_link(link_id: int, caption: str = '') -> Post:
         link.save(update_fields=['status'])
 
         return post
+    except InstagramRateLimitError:
+        raise
     except Exception as exc:
         post.status = 'failed'
         clean_err = str(exc)

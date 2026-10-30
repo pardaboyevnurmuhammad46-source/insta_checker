@@ -82,9 +82,11 @@ from .services import (
     refresh_user_token,
     get_configured_milestones,
     update_post_metrics,
+    check_content_publishing_limit,
+    get_user_post_cooldown,
 )
 from .tasks import publish_reels_task, check_post_metrics_task, sync_user_media_task
-from .instagram_errors import get_instagram_errors_last_hour
+from .instagram_errors import get_instagram_errors_last_hour, get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -1200,6 +1202,11 @@ def user_publish_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    # Instagram kunlik post limitini tekshirish
+    can_post, limit_err, _ = check_content_publishing_limit(ig_user)
+    if not can_post:
+        return Response({"error": limit_err}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
     # Takroriy bosishdan himoya: faqat haqiqatan jarayondagi postlar (failed postlar bloklamaydi)
     active_post = Post.objects.filter(
         link__user=ig_user,
@@ -1220,6 +1227,18 @@ def user_publish_video(request):
             "status": active_post.status,
         }, status=status.HTTP_409_CONFLICT)
 
+    # Bir vaqtda ikki so'rov cooldown'ni aylanib o'tmasligi uchun atomik Redis qulfi
+    r = None
+    try:
+        r = get_redis_client()
+        lock_key = f"lock:user_publish:{ig_user.id}"
+        if r and not r.set(lock_key, "1", nx=True, ex=10):
+            return Response({
+                "error": "Jarayonda bo'lgan so'rov mavjud. Iltimos, kuting.",
+            }, status=status.HTTP_409_CONFLICT)
+    except Exception as redis_exc:
+        logger.debug("Redis publish lock tekshirishda xatolik: %s", redis_exc)
+
     link = UniqueLink.objects.filter(user=ig_user, post__isnull=True).order_by('-id').first()
     if not link:
         link = UniqueLink.objects.create(user=ig_user, video=chosen_video)
@@ -1234,13 +1253,29 @@ def user_publish_video(request):
     post.last_checked_at = timezone.now()
     post.save(update_fields=['status', 'error', 'last_checked_at'])
 
+    cooldown_active, remaining_seconds, next_post_time, formatted_time = get_user_post_cooldown(ig_user)
+    if cooldown_active and remaining_seconds > 0:
+        publish_reels_task.apply_async(args=[link.id], countdown=remaining_seconds)
+        return Response({
+            "message": f"Post navbatga qo'yildi. Cooldown tufayli keyingi post: {formatted_time} da avtomatik joylanadi.",
+            "post_id": post.id,
+            "status": post.status,
+            "link_token": str(link.token),
+            "cooldown_active": True,
+            "remaining_seconds": remaining_seconds,
+            "next_post_time": formatted_time,
+        }, status=status.HTTP_202_ACCEPTED)
+
     publish_reels_task.delay(link.id)
 
     return Response({
         "message": "Video Reels sifatida joylash navbatiga qo'yildi.",
         "post_id": post.id,
         "status": post.status,
-        "link_token": str(link.token)
+        "link_token": str(link.token),
+        "cooldown_active": False,
+        "remaining_seconds": 0,
+        "next_post_time": None,
     }, status=status.HTTP_202_ACCEPTED)
 
 
@@ -1373,6 +1408,21 @@ def user_publish_status(request):
     else:
         can_publish = True
 
+    if can_publish and ig_user:
+        can_post, limit_err, _ = check_content_publishing_limit(ig_user)
+        if not can_post:
+            can_publish = False
+            can_publish_reason = limit_err
+
+    cooldown_active = False
+    cooldown_remaining_seconds = 0
+    formatted_next_post_time = None
+    if ig_user:
+        cooldown_active, cooldown_remaining_seconds, _, formatted_next_post_time = get_user_post_cooldown(ig_user)
+        if cooldown_active and cooldown_remaining_seconds > 0 and can_publish:
+            can_publish = False
+            can_publish_reason = f"Postlar orasida kutish (cooldown). Keyingi post: {formatted_next_post_time} da mumkin."
+
     response_data = {
         **base_response,
         "has_post": True,
@@ -1389,6 +1439,9 @@ def user_publish_status(request):
         "retries_left": retries_left,
         "can_publish": can_publish,
         "can_publish_reason": can_publish_reason,
+        "cooldown_active": cooldown_active,
+        "cooldown_remaining_seconds": cooldown_remaining_seconds,
+        "next_post_time": formatted_next_post_time,
         "ai_verified": getattr(post, 'ai_verified', False),
         "ai_confidence": getattr(post, 'ai_confidence', 0.0),
         "ai_detection_source": getattr(post, 'ai_detection_source', 'none'),

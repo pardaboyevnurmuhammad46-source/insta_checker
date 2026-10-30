@@ -46,7 +46,8 @@ class InstagramMetricsError(InstagramBaseError):
 
 
 class InstagramRateLimitError(InstagramMetricsError):
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, retry_after: float | None = None, **kwargs):
+        self.retry_after = retry_after
         kwargs.setdefault('error_type', InstagramErrorType.RATE_LIMIT)
         super().__init__(message, **kwargs)
 

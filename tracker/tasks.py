@@ -5,7 +5,7 @@ from celery import shared_task, group
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
-from .models import Post, InstagramUser
+from .models import Post, InstagramUser, UniqueLink, Notification
 from .rate_limiter import rate_limiter
 from .instagram_errors import mask_sensitive_data, get_redis_client, InstagramErrorType
 from .instagram_client import get_instagram_client
@@ -39,10 +39,51 @@ def publish_reels_task(self, link_id: int, caption: str = ''):
         # Yangi chiqqan post statistikasini 15 soniyadan so'ng darhol birinchi marta tekshirish
         check_post_metrics_task.apply_async(args=[post.id], countdown=15)
         return {"post_id": post.id, "ig_media_id": post.ig_media_id, "status": post.status}
+    except InstagramRateLimitError as exc:
+        retry_after = getattr(exc, 'retry_after', 60.0) or 60.0
+        countdown = max(1, int(math.ceil(retry_after)))
+        logger.warning("Reels joylash rate limit tufayli kechiktirildi (link_id=%s): countdown=%ds", link_id, countdown)
+        raise self.retry(exc=exc, countdown=countdown, max_retries=5)
     except InstagramPublishError as exc:
         logger.error("Reels yuklashda xatolik (link_id=%s): %s", link_id, mask_sensitive_data(str(exc)))
-        # if "tarmoq" in str(exc).lower() or "timeout" in str(exc).lower():
-        #     raise self.retry(exc=exc)
+        err_str = str(exc)
+        err_code = getattr(exc, 'error_code', None)
+        err_subcode = getattr(exc, 'error_subcode', None)
+
+        # 2207042: 24 soatlik publishing limit -> qayta urinilmaydi, foydalanuvchiga xabar beriladi
+        if err_subcode == 2207042 or "2207042" in err_str:
+            try:
+                link = UniqueLink.objects.select_related('user').get(id=link_id)
+                post, _ = Post.objects.get_or_create(link=link)
+                post.status = 'failed'
+                post.error = "Instagram kunlik post joylash limiti tugadi (24 soatlik limit). Ertaga qayta urinib ko'ring."
+                post.save(update_fields=['status', 'error'])
+                # Kunlik limit to'lganda link failed bo'lmaydi, ertasi kuni qayta urinish uchun pending qoladi
+                link.status = 'pending'
+                link.save(update_fields=['status'])
+                Notification.objects.create(
+                    user=link.user,
+                    kind='system',
+                    message="Instagram hisobingizda 24 soatlik Reels joylash limiti to'ldi. Ertaga yana urinib ko'ring.",
+                )
+            except Exception as notify_err:
+                logger.exception("2207042 post statusini saqlashda xatolik: %s", notify_err)
+            return {"error": "Instagram 24 soatlik limit", "status": "failed"}
+
+        # 1390008: Qisqa muddatli throttle -> qayta urinishga loyiq
+        if err_subcode == 1390008 or "1390008" in err_str:
+            raise self.retry(exc=exc, countdown=60)
+
+        # 4, 17, 613, 9, 341: Akkaunt/App rate limit -> qayta urinma, akkauntni to'xtatib tur
+        if (err_code in {4, 9, 17, 341, 613}) or ("1349210" in err_str or "Application request limit" in err_str):
+            try:
+                link = UniqueLink.objects.select_related('user').get(id=link_id)
+                r = get_redis_client()
+                r.set(f"{{ig_rate}}:acc:{link.user_id}:paused", "rate_limit", ex=600)
+            except Exception:
+                pass
+            return {"error": "Rate limit oshdi. Akkaunt keyingi aylanishga qoldirildi.", "status": "queued"}
+
         if isinstance(exc, InstagramNetworkError):
             raise self.retry(exc=exc)
         return {"error": mask_sensitive_data(str(exc)), "status": "failed"}
@@ -79,7 +120,7 @@ def check_post_metrics_task(self, post_id: int):
         countdown = max(1, int(math.ceil(retry_after)))
         # Ruxsat bo'lmasa, vazifa xato hisoblanmasin va post statusi o'zgarmasin:
         # qisqa kechiktirib qayta navbatga qo'yilsin
-        raise self.retry(countdown=countdown, max_retries=None)
+        raise self.retry(countdown=countdown, max_retries=5)
 
     try:
         updated_post = update_post_metrics(post)
@@ -99,13 +140,34 @@ def check_post_metrics_task(self, post_id: int):
             "status": updated_post.status,
         }
     except InstagramRateLimitError as exc:
-        # Instagram'dan rate limit xatosi: post o'chirilmasin, xato deb belgilanmasin
         rate_limiter.trigger_backoff(duration_seconds=60)
+        err_code = getattr(exc, 'error_code', None)
+        err_subcode = getattr(exc, 'error_subcode', None)
+
+        if err_subcode == 1390008:
+            logger.info("Qisqa muddatli throttle (1390008) aniqlandi, 60s dan keyin qayta uriniladi (post_id=%s)", post_id)
+            raise self.retry(countdown=60, max_retries=5)
+
+        if err_code in {4, 9, 17, 341, 613}:
+            if account_id:
+                try:
+                    r = get_redis_client()
+                    r.set(f"{{ig_rate}}:acc:{account_id}:paused", "rate_limit", ex=600)
+                except Exception:
+                    pass
+            post.next_check_at = timezone.now() + timedelta(minutes=10)
+            post.save(update_fields=['next_check_at'])
+            logger.warning(
+                "Akkaunt rate limit tufayli to'xtatildi (post_id=%s, account_id=%s): keyingi aylanishga qoldirildi",
+                post_id, account_id
+            )
+            return {"rate_limited": True, "account_paused": True}
+
         logger.warning(
             "Instagram rate limit xatosi (post_id=%s): vazifa 60 soniyaga kechiktirildi",
             post_id,
         )
-        raise self.retry(countdown=60, max_retries=None)
+        raise self.retry(countdown=60, max_retries=5)
     except InstagramMetricsError as exc:
         logger.warning("Post statistikasini olishda xatolik (post_id=%s): %s", post_id, mask_sensitive_data(str(exc)))
         if isinstance(exc, InstagramNetworkError):

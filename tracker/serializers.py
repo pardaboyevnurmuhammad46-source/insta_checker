@@ -288,6 +288,9 @@ class UserPublishStatusOutputSerializer(serializers.Serializer):
     points_awarded = serializers.IntegerField(default=0, required=False)
     last_checked_at = serializers.DateTimeField(allow_null=True, required=False)
     next_check_at = serializers.DateTimeField(allow_null=True, required=False)
+    cooldown_active = serializers.BooleanField(default=False, required=False)
+    cooldown_remaining_seconds = serializers.IntegerField(default=0, required=False)
+    next_post_time = serializers.CharField(allow_null=True, required=False)
 
 class UserProfileOutputSerializer(serializers.Serializer):
     id = serializers.IntegerField()

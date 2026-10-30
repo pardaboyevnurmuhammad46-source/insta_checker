@@ -25,6 +25,7 @@ from .exceptions import (
     InstagramMetricsNetworkError,
     TokenInvalid,
 )
+from .rate_limiter import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -68,61 +69,66 @@ class InstagramClient(ABC):
         pass
 
     @abstractmethod
-    def check_account_type(self, access_token: str, ig_user_id: str = 'me') -> str:
+    def check_account_type(self, access_token: str, ig_user_id: str = 'me', account_id: int | None = None) -> str:
         """Akkaunt turini tekshiradi (BUSINESS, MEDIA_CREATOR, PERSONAL)."""
         pass
 
     @abstractmethod
-    def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
+    def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '', account_id: int | None = None) -> str:
         """Reels media container yaratadi va container ID qaytaradi (URL usuli)."""
         pass
 
     @abstractmethod
     def create_reels_container_resumable(
-        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True, account_id: int | None = None
     ) -> tuple[str, str]:
         """Resumable upload uchun container yaratadi va (container_id, upload_uri) qaytaradi."""
         pass
 
     @abstractmethod
     def upload_video_binary(
-        self, upload_url: str, file_obj, file_size: int, access_token: str
+        self, upload_url: str, file_obj, file_size: int, access_token: str, account_id: int | None = None
     ) -> None:
         """Video binary oqimini Meta rupload serveriga yuklaydi."""
         pass
 
     @abstractmethod
-    def check_container_status(self, container_id: str, access_token: str) -> dict:
+    def check_container_status(self, container_id: str, access_token: str, account_id: int | None = None) -> dict:
         """Container tayyorlik holatini tekshiradi."""
         pass
 
     @abstractmethod
-    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
-        """Container yuklanishi tugashini kutadi (har 2 soniyada tekshiradi)."""
+    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2, account_id: int | None = None) -> bool:
+        """Container yuklanishi tugashini kutadi."""
         pass
 
     @abstractmethod
-    def publish_container(self, ig_user_id: str, container_id: str, access_token: str) -> str:
+    def publish_container(self, ig_user_id: str, container_id: str, access_token: str, account_id: int | None = None) -> str:
         """Containerni Instagramga nashr qiladi va media ID qaytaradi."""
         pass
 
     @abstractmethod
-    def get_media_permalink(self, ig_media_id: str, access_token: str) -> str:
+    def get_media_permalink(self, ig_media_id: str, access_token: str, account_id: int | None = None) -> str:
         """Nashr qilingan postning permalink havolasini oladi."""
         pass
 
     @abstractmethod
-    def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
+    def get_content_publishing_limit(self, ig_user_id: str, access_token: str, account_id: int | None = None) -> dict:
+        """Foydalanuvchining kontent nashr etish kvotasi ma'lumotlarini (quota_usage, config) oladi."""
+        pass
+
+    @abstractmethod
+    def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None, account_id: int | None = None) -> dict:
         """Post statistikasi (views, likes, comments) ni oladi."""
         pass
 
     @abstractmethod
-    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False) -> list[dict] | tuple[list[dict], bool]:
+    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False, account_id: int | None = None) -> list[dict] | tuple[list[dict], bool]:
         """Oxirgi medialar ro'yxatini oladi (maksimum 4 sahifa)."""
         pass
 
     @abstractmethod
-    def get_media_insights(self, access_token: str, media_id: str) -> dict:
+    def get_media_insights(self, access_token: str, media_id: str, account_id: int | None = None) -> dict:
         """Media statistikasi va tahlillarini oladi (views, reach, likes, comments, shares, saved)."""
         pass
 
@@ -136,6 +142,11 @@ class RealInstagramClient(InstagramClient):
     def _requests(self):
         import tracker.services as svc
         return getattr(svc, 'requests', requests)
+
+    def _check_business_headers(self, response, account_id: str | int | None = None):
+        """Response sarlavhasidagi X-Business-Use-Case-Usage ni o'qib rate limiterga uzatadi."""
+        if response is not None and hasattr(response, 'headers') and response.headers:
+            rate_limiter.parse_and_apply_business_usage(response.headers, account_id=account_id)
 
     def build_auth_url(self, state: str) -> str:
         base_url = "https://www.instagram.com/oauth/authorize"
@@ -226,10 +237,11 @@ class RealInstagramClient(InstagramClient):
         missing = [perm for perm in REQUIRED_PERMISSIONS if perm not in granted]
         return (len(missing) == 0, missing)
 
-    def check_account_type(self, access_token: str, ig_user_id: str = 'me') -> str:
+    def check_account_type(self, access_token: str, ig_user_id: str = 'me', account_id: int | None = None) -> str:
         url = f"https://graph.instagram.com/v21.0/{ig_user_id}"
         try:
             response = self._requests.get(url, params={'fields': 'account_type,username', 'access_token': access_token}, timeout=15)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             raise InstagramNetworkError(f"Akkaunt turini tekshirishda tarmoq xatosi: {exc}") from exc
 
@@ -242,7 +254,7 @@ class RealInstagramClient(InstagramClient):
             return 'BUSINESS'
         return str(acc_type).upper()
 
-    def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
+    def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '', account_id: int | None = None) -> str:
         url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media"
         payload = {
             'media_type': 'REELS',
@@ -252,6 +264,7 @@ class RealInstagramClient(InstagramClient):
         }
         try:
             response = self._requests.post(url, data=payload, timeout=30)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             raise InstagramPublishNetworkError(f"Reels container yaratishda tarmoq xatoligi: {exc}") from exc
 
@@ -264,7 +277,7 @@ class RealInstagramClient(InstagramClient):
         return str(container_id)
 
     def create_reels_container_resumable(
-        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True, account_id: int | None = None
     ) -> tuple[str, str]:
         url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media"
         payload = {
@@ -276,6 +289,7 @@ class RealInstagramClient(InstagramClient):
         }
         try:
             response = self._requests.post(url, data=payload, timeout=30)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             raise InstagramPublishNetworkError(f"Resumable container yaratishda tarmoq xatoligi: {exc}") from exc
 
@@ -290,7 +304,7 @@ class RealInstagramClient(InstagramClient):
         return str(container_id), str(upload_uri)
 
     def upload_video_binary(
-        self, upload_url: str, file_obj, file_size: int, access_token: str
+        self, upload_url: str, file_obj, file_size: int, access_token: str, account_id: int | None = None
     ) -> None:
         headers = {
             'Authorization': f'OAuth {access_token}',
@@ -301,13 +315,14 @@ class RealInstagramClient(InstagramClient):
             if hasattr(file_obj, 'seek'):
                 file_obj.seek(0)
             response = self._requests.post(upload_url, data=file_obj, headers=headers, timeout=120)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             raise InstagramPublishNetworkError(f"Videoni Meta serveriga yuklashda tarmoq xatoligi: {exc}") from exc
 
         if response.status_code not in (200, 201):
             raise InstagramPublishError(f"Video binary yuklanmadi ({response.status_code}): {response.text}")
 
-    def check_container_status(self, container_id: str, access_token: str) -> dict:
+    def check_container_status(self, container_id: str, access_token: str, account_id: int | None = None) -> dict:
         url = f"https://graph.instagram.com/v21.0/{container_id}"
         params = {
             'fields': 'status_code,status',
@@ -315,6 +330,7 @@ class RealInstagramClient(InstagramClient):
         }
         try:
             response = self._requests.get(url, params=params, timeout=15)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             raise InstagramPublishNetworkError(f"Container holatini tekshirishda xatolik: {exc}") from exc
 
@@ -323,9 +339,18 @@ class RealInstagramClient(InstagramClient):
 
         return response.json()
 
-    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
-        for _ in range(max_attempts):
-            status_data = self.check_container_status(container_id, access_token)
+    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2, account_id: int | None = None) -> bool:
+        delays = [2, 3, 5, 8, 10]
+        total_waited = 0
+        max_wait_seconds = max_attempts * delay
+        attempt = 0
+        while total_waited < max_wait_seconds:
+            if account_id:
+                allowed, retry_after, _ = rate_limiter.acquire(account_id=account_id)
+                if not allowed:
+                    time.sleep(min(retry_after, 5.0))
+
+            status_data = self.check_container_status(container_id, access_token, account_id=account_id)
             status_code = status_data.get('status_code')
             if status_code == 'FINISHED':
                 return True
@@ -335,14 +360,18 @@ class RealInstagramClient(InstagramClient):
                     "Mumkin bo'lgan sabablar: "
                     "1) Video Reels talablariga mos emas (vertikal 9:16 emas, masalan gorizontal 16:9 yoki davomiyligi 3-90 soniya oralig'ida emas); "
                     "2) Video yuklash jarayonida xatolik yuz berdi; "
-                    "3) Akkauntning kunlik Reels joylash limiti (25-50 ta) tugagan."
+                    "3) Akkauntning kunlik Reels joylash limiti tugagan."
                 )
                 raise InstagramPublishError(err_hint)
-            time.sleep(delay)
 
-        raise InstagramPublishNetworkError(f"Reels videosini qayta ishlash vaqti tugadi (maksimal {max_attempts * delay} soniya kutildi).")
+            cur_delay = delays[min(attempt, len(delays) - 1)]
+            time.sleep(cur_delay)
+            total_waited += cur_delay
+            attempt += 1
 
-    def publish_container(self, ig_user_id: str, container_id: str, access_token: str) -> str:
+        raise InstagramPublishNetworkError(f"Reels videosini qayta ishlash vaqti tugadi (maksimal {max_wait_seconds} soniya kutildi).")
+
+    def publish_container(self, ig_user_id: str, container_id: str, access_token: str, account_id: int | None = None) -> str:
         url = f"https://graph.instagram.com/v21.0/{ig_user_id}/media_publish"
         payload = {
             'creation_id': container_id,
@@ -350,6 +379,7 @@ class RealInstagramClient(InstagramClient):
         }
         try:
             response = self._requests.post(url, data=payload, timeout=30)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             raise InstagramPublishNetworkError(f"Reels'ni publish qilishda tarmoq xatoligi: {exc}") from exc
 
@@ -361,7 +391,7 @@ class RealInstagramClient(InstagramClient):
             raise InstagramPublishError("Nashr etilgan media ID olinmadi.")
         return str(media_id)
 
-    def get_media_permalink(self, ig_media_id: str, access_token: str) -> str:
+    def get_media_permalink(self, ig_media_id: str, access_token: str, account_id: int | None = None) -> str:
         url = f"https://graph.instagram.com/v21.0/{ig_media_id}"
         params = {
             'fields': 'permalink',
@@ -369,13 +399,46 @@ class RealInstagramClient(InstagramClient):
         }
         try:
             response = self._requests.get(url, params=params, timeout=15)
+            self._check_business_headers(response, account_id=account_id)
             if response.status_code == 200:
                 return response.json().get('permalink') or f"https://www.instagram.com/reel/{ig_media_id}/"
         except requests.RequestException:
             pass
         return f"https://www.instagram.com/reel/{ig_media_id}/"
 
-    def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
+    def get_content_publishing_limit(self, ig_user_id: str, access_token: str, account_id: int | None = None) -> dict:
+        url = f"https://graph.instagram.com/v21.0/{ig_user_id}/content_publishing_limit"
+        params = {
+            'fields': 'quota_usage,config',
+            'access_token': access_token,
+        }
+        try:
+            response = self._requests.get(url, params=params, timeout=15)
+            self._check_business_headers(response, account_id=account_id)
+        except requests.RequestException as exc:
+            raise InstagramPublishNetworkError(f"Publishing limit olishda tarmoq xatoligi: {exc}") from exc
+
+        if response.status_code != 200:
+            raise InstagramPublishError(f"Publishing limit olib bo'lmadi ({response.status_code}): {response.text}")
+
+        default_quota = int(getattr(settings, 'MAX_POSTS_PER_USER_PER_DAY', 100))
+        res_data = response.json()
+        items = res_data.get('data', [])
+        if items and isinstance(items, list):
+            item = items[0]
+            config = item.get('config', {})
+            return {
+                'quota_usage': int(item.get('quota_usage', 0)),
+                'quota_total': int(config.get('quota_total') or default_quota),
+                'quota_duration': int(config.get('quota_duration', 86400)),
+            }
+        return {
+            'quota_usage': int(res_data.get('quota_usage', 0)),
+            'quota_total': int(res_data.get('config', {}).get('quota_total') or default_quota),
+            'quota_duration': int(res_data.get('config', {}).get('quota_duration', 86400)),
+        }
+
+    def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None, account_id: int | None = None) -> dict:
         media_url = f"https://graph.instagram.com/v21.0/{ig_media_id}"
         params = {
             'fields': 'like_count,comments_count,media_type',
@@ -384,6 +447,7 @@ class RealInstagramClient(InstagramClient):
 
         try:
             response = self._requests.get(media_url, params=params, timeout=15)
+            self._check_business_headers(response, account_id=account_id)
         except requests.RequestException as exc:
             record_instagram_error(InstagramErrorType.SERVER_ERROR)
             log_instagram_error(
@@ -476,10 +540,10 @@ class RealInstagramClient(InstagramClient):
             'views': int(views or 0),
         }
 
-    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False) -> list[dict] | tuple[list[dict], bool]:
+    def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False, account_id: int | None = None) -> list[dict] | tuple[list[dict], bool]:
         return list_recent_media(token=access_token, limit=limit, return_paging_info=return_paging_info)
 
-    def get_media_insights(self, access_token: str, media_id: str) -> dict:
+    def get_media_insights(self, access_token: str, media_id: str, account_id: int | None = None) -> dict:
         return get_media_insights(token=access_token, media_id=media_id)
 
 
@@ -517,43 +581,63 @@ class DryRunInstagramClient(InstagramClient):
     def verify_token_permissions(self, access_token: str) -> tuple[bool, list[str]]:
         return True, []
 
-    def check_account_type(self, access_token: str, ig_user_id: str = 'me') -> str:
+    def check_account_type(self, access_token: str, ig_user_id: str = 'me', account_id: int | None = None) -> str:
         return 'BUSINESS'
 
-    def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '') -> str:
+    def create_reels_container(self, ig_user_id: str, video_url: str, access_token: str, caption: str = '', account_id: int | None = None) -> str:
         container_id = f"dry_run_container_{uuid.uuid4().hex[:10]}"
         return container_id
 
     def create_reels_container_resumable(
-        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True
+        self, ig_user_id: str, access_token: str, caption: str = '', share_to_feed: bool = True, account_id: int | None = None
     ) -> tuple[str, str]:
         container_id = f"dry_run_container_{uuid.uuid4().hex[:10]}"
         return container_id, f"https://rupload.facebook.com/ig-api-upload/v21.0/{container_id}"
 
     def upload_video_binary(
-        self, upload_url: str, file_obj, file_size: int, access_token: str
+        self, upload_url: str, file_obj, file_size: int, access_token: str, account_id: int | None = None
     ) -> None:
         return
 
-    def check_container_status(self, container_id: str, access_token: str) -> dict:
+    def check_container_status(self, container_id: str, access_token: str, account_id: int | None = None) -> dict:
         return {
             "status_code": "FINISHED",
             "id": container_id,
         }
 
-    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2) -> bool:
+    def wait_for_container_ready(self, container_id: str, access_token: str, max_attempts: int = 45, delay: int = 2, account_id: int | None = None) -> bool:
         # Pollingni tekshirish uchun ixtiyoriy sun'iy kechikish
         sim_delay = getattr(settings, 'DRY_RUN_PUBLISH_DELAY_SECONDS', 2.0)
         if sim_delay and sim_delay > 0:
-            time.sleep(sim_delay)
+            time.sleep(min(sim_delay, 0.1))
         return True
 
-    def publish_container(self, ig_user_id: str, container_id: str, access_token: str) -> str:
+    def publish_container(self, ig_user_id: str, container_id: str, access_token: str, account_id: int | None = None) -> str:
         media_id = f"dry_run_media_{uuid.uuid4().hex[:10]}"
         return media_id
 
-    def get_media_permalink(self, ig_media_id: str, access_token: str) -> str:
+    def get_media_permalink(self, ig_media_id: str, access_token: str, account_id: int | None = None) -> str:
         return f"https://www.instagram.com/reel/{ig_media_id}/"
+
+    def get_content_publishing_limit(self, ig_user_id: str, access_token: str, account_id: int | None = None) -> dict:
+        self._apply_simulated_delay()
+        r = get_redis_client()
+        # Redis orqali simulyatsiya sozlamalarini tekshirish
+        sim_err = r.get(f"dry_run:sim:user:{ig_user_id}:publishing_limit_error")
+        if sim_err:
+            raise InstagramPublishError(f"Simulyatsiya qilingan publishing limit xatoligi: {sim_err}")
+
+        default_quota = int(getattr(settings, 'MAX_POSTS_PER_USER_PER_DAY', 100))
+        sim_usage = r.get(f"dry_run:sim:user:{ig_user_id}:quota_usage")
+        sim_total = r.get(f"dry_run:sim:user:{ig_user_id}:quota_total")
+        quota_usage = int(sim_usage) if sim_usage is not None else 0
+        quota_total = int(sim_total) if sim_total is not None else default_quota
+
+        return {
+            'quota_usage': quota_usage,
+            'quota_total': quota_total,
+            'quota_duration': 86400,
+        }
 
     def _apply_simulated_delay(self):
         delay_min = float(getattr(settings, 'DRY_RUN_API_DELAY_MIN', 0.0))
@@ -563,10 +647,22 @@ class DryRunInstagramClient(InstagramClient):
             if delay > 0:
                 time.sleep(delay)
 
-    def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None) -> dict:
+    def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None, account_id: int | None = None) -> dict:
         self._apply_simulated_delay()
         r = get_redis_client()
         r.incr("dry_run:sim:counters:fetch_post_metrics")
+
+        # 0. Simulyatsiya qilingan response headers tekshiruvi (InstagramUser.id yoki post_id)
+        target_account_id = account_id or post_id
+        if target_account_id is not None:
+            sim_headers = r.get(f"dry_run:sim:acc:{target_account_id}:headers") or r.get(f"dry_run:sim:post:{target_account_id}:headers")
+            if sim_headers:
+                import json
+                try:
+                    h_dict = json.loads(sim_headers)
+                    rate_limiter.parse_and_apply_business_usage(h_dict, account_id=target_account_id)
+                except Exception:
+                    pass
 
         # 1. Post darajasidagi simulyatsiya qilingan xatoliklar
         if post_id is not None:
