@@ -546,6 +546,99 @@ def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str, post_
     return get_instagram_client().fetch_post_metrics(ig_media_id, access_token, post_id=post_id)
 
 
+def bulk_save_posts_metrics(
+    updates: list[dict],
+) -> dict:
+    """
+    Bir nechta postlar metrikalarini bazaga bulk usulda saqlaydi:
+    - Post.objects.bulk_update(...) orqali postlar yangilanadi
+    - O'zgargan metrikalar uchun PostStat.objects.bulk_create(...) orqali tarix yoziladi
+    - O'zgarmagan metrikalar uchun PostStat yaratilmaydi, lekin last_checked_at va next_check_at yangilanadi
+    - Sovrin marralari (500, 1000, 5000, ...) tekshirilib, sovrinlar beriladi
+    """
+    if not updates:
+        return {'updated_posts_count': 0, 'created_stats_count': 0, 'awarded_prizes_count': 0}
+
+    now = timezone.now()
+    posts_to_update = []
+    stats_to_create = []
+    posts_for_prizes = []
+    min_milestone = min(get_configured_milestones())
+
+    for item in updates:
+        post = item['post']
+        metrics = item.get('metrics')
+        error = item.get('error')
+        status = item.get('status')
+        deleted_detected_at = item.get('deleted_detected_at')
+
+        old_views = post.views
+        old_likes = post.likes
+        old_comments = post.comments_count
+
+        if metrics is not None:
+            post.likes = int(metrics.get('likes', post.likes) or 0)
+            post.comments_count = int(metrics.get('comments_count', post.comments_count) or 0)
+            m_views = int(metrics.get('views', 0) or 0)
+            if m_views > 0 or post.views == 0:
+                post.views = m_views
+
+            post.last_checked_at = now
+            post.next_check_at = calculate_next_check(post, now=now)
+            post.error = None
+
+            # O'zgarmagan metrika uchun yangi PostStat yaratilmaydi:
+            if (post.views != old_views or
+                post.likes != old_likes or
+                post.comments_count != old_comments):
+                stats_to_create.append(
+                    PostStat(
+                        post=post,
+                        views=post.views,
+                        likes=post.likes,
+                        comments_count=post.comments_count,
+                    )
+                )
+
+            if post.views >= min_milestone:
+                posts_for_prizes.append(post)
+
+        if error is not None:
+            post.error = error
+        if status is not None:
+            post.status = status
+        if deleted_detected_at is not None:
+            post.deleted_detected_at = deleted_detected_at
+
+        posts_to_update.append(post)
+
+    # 1. Post.objects.bulk_update
+    if posts_to_update:
+        Post.objects.bulk_update(
+            posts_to_update,
+            fields=['likes', 'comments_count', 'views', 'last_checked_at', 'next_check_at', 'error', 'status', 'deleted_detected_at'],
+            batch_size=500,
+        )
+
+    # 2. PostStat.objects.bulk_create
+    created_stats_count = 0
+    if stats_to_create:
+        PostStat.objects.bulk_create(stats_to_create, batch_size=500)
+        created_stats_count = len(stats_to_create)
+
+    # 3. Prizlarni tekshirish va berish
+    awarded_prizes_count = 0
+    for p in posts_for_prizes:
+        prizes = check_and_award_prizes(p)
+        awarded_prizes_count += len(prizes)
+
+    return {
+        'updated_posts_count': len(posts_to_update),
+        'created_stats_count': created_stats_count,
+        'awarded_prizes_count': awarded_prizes_count,
+    }
+
+
 def update_post_metrics(post: Post) -> Post:
     """
     Post statistikasini Instagram'dan tortib oladi, bazani yangilaydi va sovrinlarni tekshiradi.
@@ -567,6 +660,10 @@ def update_post_metrics(post: Post) -> Post:
 
     try:
         metrics = fetch_post_metrics_from_instagram(post.ig_media_id, user.access_token, post_id=post.id)
+        old_views = post.views
+        old_likes = post.likes
+        old_comments = post.comments_count
+
         post.likes = metrics['likes']
         post.comments_count = metrics['comments_count']
         if metrics['views'] > 0 or post.views == 0:
@@ -577,13 +674,19 @@ def update_post_metrics(post: Post) -> Post:
         post.error = None
         post.save(update_fields=['likes', 'comments_count', 'views', 'last_checked_at', 'next_check_at', 'error'])
 
-        # Tarix (PostStat) yozish
-        PostStat.objects.create(
-            post=post,
-            views=post.views,
-            likes=post.likes,
-            comments_count=post.comments_count,
+        # Tarix (PostStat) yozish: o'zgarmagan metrika uchun yangi PostStat yaratilmaydi
+        metrics_changed = (
+            post.views != old_views or
+            post.likes != old_likes or
+            post.comments_count != old_comments
         )
+        if metrics_changed:
+            PostStat.objects.create(
+                post=post,
+                views=post.views,
+                likes=post.likes,
+                comments_count=post.comments_count,
+            )
 
         # Sovrin berish logikasi
         check_and_award_prizes(post)
@@ -913,18 +1016,23 @@ def sync_user_media(instagram_user: InstagramUser) -> dict:
             insights = get_media_insights(token=token, media_id=post.ig_media_id)
             views = int(insights.get('views') or 0)
             now_ts = timezone.now()
+            old_views = post.views
+            old_likes = post.likes
+            old_comments = post.comments_count
+
             post.views = views
             post.last_synced_at = now_ts
             post.last_checked_at = now_ts
             post.next_check_at = calculate_next_check(post, now=now_ts)
             post.save(update_fields=['views', 'last_synced_at', 'last_checked_at', 'next_check_at'])
 
-            PostStat.objects.create(
-                post=post,
-                views=post.views,
-                likes=post.likes,
-                comments_count=post.comments_count,
-            )
+            if post.views != old_views or post.likes != old_likes or post.comments_count != old_comments:
+                PostStat.objects.create(
+                    post=post,
+                    views=post.views,
+                    likes=post.likes,
+                    comments_count=post.comments_count,
+                )
             try:
                 process_and_verify_post_ai(post)
                 post.refresh_from_db()
