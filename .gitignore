@@ -7,3 +7,7 @@ venv/
 .venv/
 staticfiles/
 *.csv
+.env.bak
+*.sql
+celerybeat-schedule*
+locust.log
