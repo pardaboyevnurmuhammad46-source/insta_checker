@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/api/user/publish/,HTTPError('400 Client Error: Bad Request for url: /api/user/publish/'),612,2026-11-16T20:57:41Z,2026-11-16T21:02:39Z

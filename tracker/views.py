@@ -493,6 +493,8 @@ def me_summary(request):
             "total_views": 0,
             "total_likes": 0,
             "total_comments": 0,
+            "total_follows": 0,
+            # "total_follows": ig_user.followers_count,
             "posts_count": 0,
             "prizes_count": 0,
             "last_checked_at": None,
@@ -509,6 +511,7 @@ def me_summary(request):
         total_likes=Coalesce(Sum('likes'), 0),
         total_comments=Coalesce(Sum('comments_count'), 0),
         last_checked_at=Max('last_checked_at'),
+        # total_follows=Coalesce(Sum('follows'), 0),
     )
 
     total_views = metrics['total_views']
@@ -535,6 +538,11 @@ def me_summary(request):
         "total_views": total_views,
         "total_likes": metrics['total_likes'],
         "total_comments": metrics['total_comments'],
+        "total_follows": ig_user.followers_count,
+        # "total_views": total_views,
+        # "total_likes": metrics['total_likes'],
+        # "total_comments": metrics['total_comments'],
+        # "total_follows": metrics['total_follows'],
         "posts_count": posts_count,
         "prizes_count": prizes_count,
         "last_checked_at": metrics['last_checked_at'],
@@ -1192,7 +1200,7 @@ def user_publish_video(request):
         )
 
     if chosen_video.status in ['pending', 'processing']:
-        return Response(
+        return Responsepublish(
             {"error": "Videongiz hozirda tayyorlanmoqda (formatlanmoqda). Iltimos, jarayon tugashini kuting."},
             status=status.HTTP_400_BAD_REQUEST
         )

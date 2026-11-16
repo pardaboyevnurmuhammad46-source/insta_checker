@@ -5,6 +5,7 @@ import logging
 import requests
 from django.conf import settings
 from django.utils import timezone
+from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,57 @@ def verify_video_advertisement(
     }
 
 
+def download_posted_video(media_id: str, token: str) -> str | None:
+    try:
+        res = requests.get(
+            f"https://graph.instagram.com/{media_id}",
+            params={'fields': 'media_url', 'access_token': token},
+            timeout=15,
+        )
+        media_url = res.json().get('media_url') if res.status_code == 200 else None
+        if not media_url:
+            return None
+        tmp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        with requests.get(media_url, stream=True, timeout=60) as video:
+            for chunk in video.iter_content(1024 * 256):
+                tmp.write(chunk)
+        tmp.close()
+        return tmp.name
+    except Exception as exc:
+        logger.warning("Postdagi videoni yuklab bo'lmadi: %s", exc)
+        return None
+
+
+def transcribe_video(video_path: str) -> str:
+    audio_path = extract_audio(video_path)
+    if not audio_path:
+        return ""
+    try:
+        return transcribe_audio(audio_path)
+    finally:
+        os.remove(audio_path)
+
+
+def calc_audio_match(post) -> float | None:
+    video = post.link.video
+    if not video.transcript:
+        video.transcript = transcribe_video(video.file.path)
+        video.save(update_fields=['transcript'])
+
+    posted_path = download_posted_video(post.ig_media_id, post.link.user.access_token)
+    if not posted_path or not video.transcript:
+        return None
+    try:
+        posted_text = transcribe_video(posted_path)
+    finally:
+        os.remove(posted_path)
+    if not posted_text:
+        return None
+
+    ratio = SequenceMatcher(None, video.transcript.lower(), posted_text.lower()).ratio()
+    return round(ratio * 100, 1)
+
+
 def process_and_verify_post_ai(post) -> dict:
     """
     Post uchun to'liq AI tekshiruvini bajaradi va bazani yangilaydi.
@@ -248,14 +300,25 @@ def process_and_verify_post_ai(post) -> dict:
     )
 
     post.ai_verified = result['is_verified']
+    # post.audio_match_percent = calc_audio_match(post)
+    try:
+        post.audio_match_percent = calc_audio_match(post)
+    except Exception as exc:
+        logger.warning("Audio foiz hisoblashda xatolik: %s", exc)
+        post.audio_match_percent = None
     post.ai_confidence = result['confidence']
     post.ai_detection_source = result['detection_source']
     post.transcript = result['transcript']
     post.ai_explanation = result['explanation']
     post.points_awarded = result['points']
+    # post.save(update_fields=[
+    #     'ai_verified', 'ai_confidence', 'ai_detection_source',
+    #     'transcript', 'ai_explanation', 'points_awarded'
+    # ])
     post.save(update_fields=[
         'ai_verified', 'ai_confidence', 'ai_detection_source',
-        'transcript', 'ai_explanation', 'points_awarded'
+        'transcript', 'ai_explanation', 'points_awarded',
+        'audio_match_percent',
     ])
 
     # Foydalanuvchiga bildirishnoma yaratish

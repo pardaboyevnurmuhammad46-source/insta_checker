@@ -1,0 +1,14 @@
+Count,Message,Traceback,Nodes
+300,name 'io' is not defined,"  File ""/home/nurmuhammad/server_loyxa/python_rojects_8/insta_checker/venv/lib/python3.14/site-packages/locust/user/task.py"", line 363, in run
+    self.execute_next_task()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File ""/home/nurmuhammad/server_loyxa/python_rojects_8/insta_checker/venv/lib/python3.14/site-packages/locust/user/task.py"", line 396, in execute_next_task
+    self.execute_task(self._task_queue.popleft())
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/nurmuhammad/server_loyxa/python_rojects_8/insta_checker/venv/lib/python3.14/site-packages/locust/user/task.py"", line 513, in execute_task
+    task(self.user)
+    ~~~~^^^^^^^^^^^
+  File ""/home/nurmuhammad/server_loyxa/python_rojects_8/insta_checker/loadtest/locustfile.py"", line 83, in upload_video
+    fake = io.BytesIO(b""\x00"" * 2 * 1024 * 1024)
+           ^^
+",local

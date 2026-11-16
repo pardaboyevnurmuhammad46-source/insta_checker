@@ -54,6 +54,8 @@ class InstagramUser(models.Model):
     token_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
+    followers_count = models.PositiveIntegerField(default=0)
+    followers_updated_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def is_admin(self) -> bool:
@@ -92,6 +94,7 @@ class Video(models.Model):
         default='ready',
     )
     processing_error = models.TextField(null=True, blank=True)
+    transcript = models.TextField(blank=True, default='')
 
     class Meta:
         ordering = ['-created_at']
@@ -233,6 +236,7 @@ class Post(models.Model):
     views = models.PositiveIntegerField(default=0)
     likes = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
+    follows = models.PositiveIntegerField(default=0)
     last_checked_at = models.DateTimeField(null=True, blank=True)
     next_check_at = models.DateTimeField(null=True, blank=True, db_index=True)
     error = models.TextField(null=True, blank=True)
@@ -244,6 +248,7 @@ class Post(models.Model):
     ai_detection_source = models.CharField(max_length=20, default='none')
     ai_explanation = models.TextField(null=True, blank=True)
     points_awarded = models.PositiveIntegerField(default=0)
+    audio_match_percent = models.FloatField(null=True, blank=True)
 
     class Meta:
         ordering = ['-id']
@@ -266,7 +271,14 @@ class PostStat(models.Model):
     views = models.PositiveIntegerField(default=0)
     likes = models.PositiveIntegerField(default=0)
     comments_count = models.PositiveIntegerField(default=0)
+    follows = models.PositiveIntegerField(default=0)
     checked_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    # follows = models.IntegerField(default=0)
+    profile_visits = models.IntegerField(default=0)
+
+    # audio_match_percent = models.FloatField(null=True, blank=True)
+
 
     class Meta:
         ordering = ['-checked_at']
@@ -313,8 +325,15 @@ class Notification(models.Model):
         related_name='notifications',
     )
 
+    # class Meta:
+    #     ordering = ['-created_at']
+
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'is_read']),
+        ]
 
     def __str__(self):
         return f"Notification ({self.kind}) for {self.user.name}"
@@ -373,3 +392,8 @@ class CampaignConfig(models.Model):
     def __str__(self):
         return f"CampaignConfig: {self.topic} ({self.brand_name})"
 
+
+class FollowerSnapshot(models.Model):
+    user = models.ForeignKey(InstagramUser, on_delete=models.CASCADE)
+    followers_count = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)

@@ -124,6 +124,7 @@ export interface UserSummary {
   total_views: number;
   total_likes: number;
   total_comments: number;
+  total_follows?: number;
   posts_count: number;
   prizes_count: number;
   last_checked_at: string | null;

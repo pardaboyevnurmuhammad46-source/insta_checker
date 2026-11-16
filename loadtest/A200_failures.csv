@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/api/token/,"ConnectionRefusedError(111, 'Connection refused')",4100,2026-11-16T06:43:39Z,2026-11-16T06:44:18Z

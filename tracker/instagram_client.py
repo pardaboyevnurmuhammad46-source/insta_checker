@@ -132,6 +132,30 @@ class InstagramClient(ABC):
         """Media statistikasi va tahlillarini oladi (views, reach, likes, comments, shares, saved)."""
         pass
 
+    # def count_check(name: str):
+    def count_check(name: str):
+        try:
+            r = get_redis_client()
+            key = time.strftime(f'stats:{name}:%Y%m%d%H', time.gmtime())
+            r.incr(key)
+            r.expire(key, 8 * 86400)
+        except Exception:
+            pass
+
+
+    def checks_in_last(name: str, hours: int) -> int:
+        r = get_redis_client()
+        now = time.time()
+        total = 0
+        for i in range(hours):
+            key = time.strftime(f'stats:{name}:%Y%m%d%H', time.gmtime(now - i * 3600))
+            total += int(r.get(key) or 0)
+        return total
+
+    @abstractmethod
+    def get_media_follows(self, access_token: str, media_id: str) -> dict:
+        pass
+
 
 class RealInstagramClient(InstagramClient):
     """
@@ -439,6 +463,7 @@ class RealInstagramClient(InstagramClient):
         }
 
     def fetch_post_metrics(self, ig_media_id: str, access_token: str, post_id: int | None = None, account_id: int | None = None) -> dict:
+        count_check('metric_checks')
         media_url = f"https://graph.instagram.com/v21.0/{ig_media_id}"
         params = {
             'fields': 'like_count,comments_count,media_type',
@@ -534,10 +559,14 @@ class RealInstagramClient(InstagramClient):
             except requests.RequestException:
                 pass
 
+        extra = get_media_follows(access_token, ig_media_id)
+
         return {
             'likes': int(likes or 0),
             'comments_count': int(comments or 0),
             'views': int(views or 0),
+            'follows': extra['follows'],
+            'profile_visits': extra['profile_visits'],
         }
 
     def list_recent_media(self, access_token: str, limit: int = 25, return_paging_info: bool = False, account_id: int | None = None) -> list[dict] | tuple[list[dict], bool]:
@@ -546,6 +575,9 @@ class RealInstagramClient(InstagramClient):
     def get_media_insights(self, access_token: str, media_id: str, account_id: int | None = None) -> dict:
         return get_media_insights(token=access_token, media_id=media_id)
 
+
+    def get_media_follows(self, access_token: str, media_id: str) -> dict:
+        return get_media_follows(token=access_token, media_id=media_id)
 
 class DryRunInstagramClient(InstagramClient):
     """
@@ -817,6 +849,9 @@ class DryRunInstagramClient(InstagramClient):
         }
 
 
+    def get_media_follows(self, access_token: str, media_id: str) -> dict:
+        return {'follows': 2, 'profile_visits': 20}
+
 def _check_instagram_response(response: requests.Response, operation: str = "api_request") -> dict:
     try:
         data = response.json()
@@ -1010,6 +1045,46 @@ def get_media_insights(token: str, media_id: str) -> dict:
 
     metrics['raw'] = data
     return metrics
+
+
+def get_media_follows(token: str, media_id: str) -> dict:
+    result = {'follows': 0, 'profile_visits': 0}
+    try:
+        response = requests.get(
+            f"https://graph.instagram.com/{media_id}/insights",
+            params={'metric': 'follows,profile_visits', 'access_token': token},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return result
+
+    if response.status_code != 200:
+        logger.warning("follows metrikasi olinmadi: %s", response.text[:200])
+        return result
+
+    for item in response.json().get('data', []):
+        values = item.get('values') or []
+        if item.get('name') in result and values:
+            result[item['name']] = int(values[0].get('value', 0) or 0)
+    return result
+
+
+def get_followers_count(token: str) -> int | None:
+    try:
+        response = requests.get(
+            "https://graph.instagram.com/v21.0/me",
+            params={'fields': 'followers_count', 'access_token': token},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code != 200:
+        logger.warning("followers_count olinmadi: %s", response.text[:200])
+        return None
+
+    value = response.json().get('followers_count')
+    return int(value) if value is not None else None
 
 
 def get_instagram_client() -> InstagramClient:

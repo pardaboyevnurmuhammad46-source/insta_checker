@@ -169,6 +169,13 @@ CACHES = {
     }
 }
 
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django.core.cache.backends.redis.RedisCache",
+#         "LOCATION": "redis://redis:6379/1",
+#     }
+# }
+
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -180,8 +187,8 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_THROTTLE_RATES': {
-        'login': '5/minute',
-        'user_sync': '3/minute',
+        'login': '100000/minute',
+        'user_sync': '100000/minute',
     },
 }
 
@@ -304,6 +311,8 @@ SPECTACULAR_SETTINGS = {
     'COMPONENT_SPLIT_REQUEST': True,
 }
 
+
+DATABASES['default']['CONN_MAX_AGE'] = 60
 
 
 

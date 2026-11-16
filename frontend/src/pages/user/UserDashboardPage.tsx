@@ -13,6 +13,7 @@ import {
   Eye,
   Heart,
   MessageCircle,
+  UserPlus,
   Video as VideoIcon,
   Award,
   ArrowRight,
@@ -61,8 +62,8 @@ export const UserDashboardPage: React.FC = () => {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="h-8 bg-slate-800 rounded w-48" />
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          {[...Array(5)].map((_, i) => (
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          {[...Array(6)].map((_, i) => (
             <div key={i} className="h-28 bg-slate-900 rounded-2xl" />
           ))}
         </div>
@@ -76,6 +77,7 @@ export const UserDashboardPage: React.FC = () => {
   const totalViews = summary?.total_views || 0;
   const totalLikes = summary?.total_likes || 0;
   const totalComments = summary?.total_comments || 0;
+  const totalFollows = summary?.total_follows || 0;
   const postsCount = summary?.posts_count || 0;
   const prizesCount = summary?.prizes_count || 0;
   const nextMilestone = summary?.next_milestone || 500;
@@ -126,7 +128,7 @@ export const UserDashboardPage: React.FC = () => {
       </div>
 
       {/* 5 ta Statistik Karta */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {/* 1. Ko'rishlar */}
         <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400 mb-2">
@@ -169,6 +171,20 @@ export const UserDashboardPage: React.FC = () => {
           <span className="text-[11px] text-slate-500 mt-1">Jami izohlar soni</span>
         </div>
 
+        {/* Obunachilar */}
+        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wider">Obunachilar</span>
+            <span className="p-2 bg-cyan-500/10 text-cyan-400 rounded-lg">
+              <UserPlus size={18} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold text-white tracking-tight">
+            {formatNumber(totalFollows)}
+          </div>
+          <span className="text-[11px] text-slate-500 mt-1">Jami obunachilar</span>
+        </div>
+
         {/* 4. Postlar */}
         <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400 mb-2">
@@ -184,7 +200,7 @@ export const UserDashboardPage: React.FC = () => {
         </div>
 
         {/* 5. Sovrinlar */}
-        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between col-span-2 lg:col-span-1">
+        <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Sovrinlar</span>
             <span className="p-2 bg-amber-500/10 text-amber-400 rounded-lg">

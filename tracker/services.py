@@ -13,7 +13,7 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 # from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest
-from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user, PostStat, Notification
+from .models import InstagramUser, UniqueLink, Post, Prize, DataDeletionRequest, get_video_for_user, PostStat, Notification, FollowerSnapshot
 from .ai_verifier import process_and_verify_post_ai
 from .rate_limiter import rate_limiter
 from .instagram_errors import (
@@ -40,6 +40,7 @@ from .instagram_client import (
     get_instagram_client,
     list_recent_media,
     get_media_insights,
+    get_followers_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,7 @@ def complete_instagram_oauth(code: str, token: str) -> tuple[InstagramUser, Uniq
     user.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
     user.status = 'connected'
     user.save(update_fields=['ig_user_id', 'name', 'access_token', 'token_expires_at', 'status'])
+    refresh_followers_count(user, max_age_minutes=0)
 
     # Agar user oldin uzilgan/xato holatida bo'lgan bo'lsa, uning to'xtatilgan postlarini qayta tiklaymiz
     if was_disconnected:
@@ -737,7 +739,7 @@ def fetch_post_metrics_from_instagram(ig_media_id: str, access_token: str, post_
 
 
 def bulk_save_posts_metrics(
-    updates: list[dict],
+        updates: list[dict],
 ) -> dict:
     """
     Bir nechta postlar metrikalarini bazaga bulk usulda saqlaydi:
@@ -765,10 +767,12 @@ def bulk_save_posts_metrics(
         old_views = post.views
         old_likes = post.likes
         old_comments = post.comments_count
+        old_follows = post.follows
 
         if metrics is not None:
             post.likes = int(metrics.get('likes', post.likes) or 0)
             post.comments_count = int(metrics.get('comments_count', post.comments_count) or 0)
+            post.follows = max(post.follows, int(metrics.get('follows', 0) or 0))
             m_views = int(metrics.get('views', 0) or 0)
             if m_views > 0 or post.views == 0:
                 post.views = m_views
@@ -779,14 +783,17 @@ def bulk_save_posts_metrics(
 
             # O'zgarmagan metrika uchun yangi PostStat yaratilmaydi:
             if (post.views != old_views or
-                post.likes != old_likes or
-                post.comments_count != old_comments):
+                    post.likes != old_likes or
+                    post.comments_count != old_comments or
+                    post.follows != old_follows):
                 stats_to_create.append(
                     PostStat(
                         post=post,
                         views=post.views,
                         likes=post.likes,
                         comments_count=post.comments_count,
+                        follows=post.follows,
+                        profile_visits=int(metrics.get('profile_visits', 0) or 0),
                     )
                 )
 
@@ -806,7 +813,7 @@ def bulk_save_posts_metrics(
     if posts_to_update:
         Post.objects.bulk_update(
             posts_to_update,
-            fields=['likes', 'comments_count', 'views', 'last_checked_at', 'next_check_at', 'error', 'status', 'deleted_detected_at'],
+            fields=['likes', 'comments_count', 'views', 'follows', 'last_checked_at', 'next_check_at', 'error', 'status', 'deleted_detected_at'],
             batch_size=500,
         )
 
@@ -828,7 +835,6 @@ def bulk_save_posts_metrics(
         'awarded_prizes_count': awarded_prizes_count,
     }
 
-
 def is_simulated_mode(token: str | None) -> bool:
     """
     Faqat mock/dry-run rejimida VA demo/test/fake prefiksli tokenlar uchun True qaytaradi.
@@ -840,6 +846,28 @@ def is_simulated_mode(token: str | None) -> bool:
         return False
     is_mock = getattr(settings, 'INSTAGRAM_MODE', 'real') == 'mock' or getattr(settings, 'INSTAGRAM_DRY_RUN', False)
     return is_mock and token.startswith(('demo_', 'test_', 'fake_'))
+
+
+def refresh_followers_count(user: InstagramUser, max_age_minutes: int = 60) -> int | None:
+    if not user.access_token or user.status != 'connected':
+        return None
+    if user.access_token.startswith('dry_run') or is_simulated_mode(user.access_token):
+        return None
+
+    now = timezone.now()
+    if user.followers_updated_at and (now - user.followers_updated_at) < timedelta(minutes=max_age_minutes):
+        return user.followers_count
+
+    count = get_followers_count(user.access_token)
+    if count is None:
+        return None
+
+    if count != user.followers_count or not user.followers_updated_at:
+        FollowerSnapshot.objects.create(user=user, followers_count=count)
+    user.followers_count = count
+    user.followers_updated_at = now
+    user.save(update_fields=['followers_count', 'followers_updated_at'])
+    return count
 
 
 def update_post_metrics(post: Post) -> Post:
@@ -861,27 +889,31 @@ def update_post_metrics(post: Post) -> Post:
         check_and_award_prizes(post)
         return post
 
+    refresh_followers_count(user)
+
     try:
         metrics = fetch_post_metrics_from_instagram(post.ig_media_id, user.access_token, post_id=post.id)
         old_views = post.views
         old_likes = post.likes
         old_comments = post.comments_count
+        old_follows = post.follows
 
         post.likes = metrics['likes']
         post.comments_count = metrics['comments_count']
+        post.follows = max(post.follows, int(metrics.get('follows', 0) or 0))
         if metrics['views'] > 0 or post.views == 0:
             post.views = metrics['views']
 
         post.last_checked_at = timezone.now()
         post.next_check_at = calculate_next_check(post)
         post.error = None
-        post.save(update_fields=['likes', 'comments_count', 'views', 'last_checked_at', 'next_check_at', 'error'])
+        post.save(update_fields=['likes', 'comments_count', 'views', 'follows', 'last_checked_at', 'next_check_at', 'error'])
 
-        # Tarix (PostStat) yozish: o'zgarmagan metrika uchun yangi PostStat yaratilmaydi
         metrics_changed = (
-            post.views != old_views or
-            post.likes != old_likes or
-            post.comments_count != old_comments
+                post.views != old_views or
+                post.likes != old_likes or
+                post.comments_count != old_comments or
+                post.follows != old_follows
         )
         if metrics_changed:
             PostStat.objects.create(
@@ -889,8 +921,9 @@ def update_post_metrics(post: Post) -> Post:
                 views=post.views,
                 likes=post.likes,
                 comments_count=post.comments_count,
+                follows=post.follows,
+                profile_visits=int(metrics.get('profile_visits', 0) or 0),
             )
-
         # Sovrin berish logikasi
         check_and_award_prizes(post)
         return post

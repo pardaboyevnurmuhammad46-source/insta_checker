@@ -238,6 +238,7 @@ class MeSummarySerializer(serializers.Serializer):
     total_views = serializers.IntegerField(default=0)
     total_likes = serializers.IntegerField(default=0)
     total_comments = serializers.IntegerField(default=0)
+    total_follows = serializers.IntegerField(default=0)
     posts_count = serializers.IntegerField(default=0)
     prizes_count = serializers.IntegerField(default=0)
     last_checked_at = serializers.DateTimeField(allow_null=True)
